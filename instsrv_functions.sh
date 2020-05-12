@@ -4,7 +4,7 @@
 # Bash include script for generically installing services on upstart, systemd & sysv systems
 # 20190312 -- Gordon Harris
 ######################################################################################################
-INCSCRIPTVER=20200422
+INCSCRIPTVER=20200504
 SCRIPTNAME=$(basename "$0")
 
 # Get the underlying user...i.e. who called sudo..

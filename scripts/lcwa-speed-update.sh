@@ -1,7 +1,7 @@
 #!/bin/bash
 # lcwa-speed-update.sh -- script to update lcwa-speed git repo and restart service..
 # Version Control for this script
-VERSION=20200430.01
+SCRIPT_VERSION=20200511.223900
 
 SCRIPT="$(readlink -f "$0")"
 SCRIPT_NAME="$(basename "$0")"
@@ -396,6 +396,23 @@ INST_NAME=lcwa-speed
 
 # Get our environmental variables..
 env_file_read
+
+# Service version is: $LCWA_VERSION
+
+# Download the install.xml file from https://raw.githubusercontent.com/gharris999/config-lcwa-speed/master/install.xml
+
+# Alternatly, just git-update the $LCWA_LOCALSUPREPO
+
+# Read the version info from the instll.xml file:
+
+#~ REPO_VERSION="$(grep -E '<version>.*</version>' "$TEMPFILE" | sed -n -e 's#<version>\(.*\)</version>#\1#p')"
+
+# Compare $REPO_VERSION with $LCWA_VERSION
+
+# If $REPO_VERSION is newer, 
+
+
+
 
 # See if we need to update this update script..
 if [ $SCRIPT_UPDATE -gt 0 ]; then

@@ -4,6 +4,7 @@
 # Bash script for installing Andi Klein's Python LCWA PPPoE Speedtest Logger 
 # as a service on systemd, upstart & sysv systems
 ######################################################################################################
+SCRIPT_VERSION=20200511.223900
 REQINCSCRIPTVER=20200422
 
 INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
@@ -15,7 +16,10 @@ if [[ -z "$INCSCRIPTVER" ]] || [[ $INCSCRIPTVER -lt $REQINCSCRIPTVER ]]; then
 	error_exit "Version ${REQINCSCRIPTVER} of ${INCLUDE_FILE} required."
 fi
 
+SCRIPT="$(readlink -f "$0")"
 SCRIPTNAME=$(basename $0)
+
+# Make sure we're running under root or sudo credentials
 is_root
 
 HAS_PYTHON2=0
@@ -30,7 +34,6 @@ NO_PAUSE=0
 FORCE=0
 NO_SCAN=0
 TEST_MODE=0
-FORCE_PYTHON3=1
 
 NEEDSUSER=1
 NEEDSCONF=1
@@ -39,6 +42,10 @@ NEEDSLOG=1
 NEEDSPRIORITY=1
 NEEDSPID=0
 
+# Default to only installing python3 dependencies..
+FORCE_PYTHON3=1
+
+# Save our HOME var to be restored later..
 CUR_HOME="$HOME"
 
 ######################################################################################################
@@ -49,7 +56,7 @@ CUR_HOME="$HOME"
 # All-revs are necessary in order to switch between branches..
 ALLREVS=0
 
-# Delete old local repo and re-checkout
+# Delete old local repo and re-clone & re-checkout
 CHECKOUT_ONLY=0
 
 # When removing /uninstalling, keep the user, local repo, data & logs..
@@ -68,6 +75,8 @@ fi
 
 INST_PATH="/usr/local/share/${INST_NAME}"
 INST_BIN="$(which python3) /usr/local/share/${INST_NAME}/src/test_speed1_3.py"
+
+SUPINST_PATH="/usr/local/share/config-${INST_NAME}"
 
 INST_PIDDIR="/var/run/${INST_NAME}"
 INST_PID="$INST_PIDDIR/${INST_NAME}.pid"
@@ -91,101 +100,143 @@ HOSTNAME=$(hostname | tr [a-z] [A-Z])
 # Service-specific Vars
 ######################################################################################################
 
+# Identifiers
 #~ LCWA_SERVICE="$INST_NAME"
 #~ LCWA_PRODUCT="$INST_PROD"
-#~ LCWA_PRODUCTID="f1a4af09-977c-458a-b3f7-f530fb9029c1"
-#~ LCWA_VERSION="20200504.110908"
-#~ LCWA_USER="$INST_USER"
-#~ LCWA_GROUP=
-#~ LCWA_REPO='https://github.com/pabloemma/LCWA.git'
-#~ LCWA_REPO='https://github.com/gharris999/LCWA.git'
-
 #~ LCWA_DESC="$INST_DESC"
+#~ LCWA_PRODUCTID="f1a4af09-977c-458a-b3f7-f530fb9029c1"				# Random GUID..
+#~ LCWA_VERSION="YYYYMMDD.HHMMSS"										# Set at 
+
+# User account and group under which the service will run..
+#~ LCWA_USER="$INST_USER"
+#~ LCWA_GROUP="nogroup"
+
+# Remote & local repos
+#~ LCWA_REPO='https://github.com/pabloemma/LCWA.git'
+#~ LCWA_REPO_BRANCH='origin/master'
 #~ LCWA_LOCALREPO="/usr/local/share/${LCWA_SERVICE}"
-#~ LCWA_DAEMON="${LOCALREPO}/src/test_speed1.py"
 
-#~ LCWA_LOGGERID="UB01"											# Prefix that identifies this speedtest logger
-#~ LCWA_TESTFREQ=10												# time between succssive speedtests in minutes
-#~ LCWA_DB_KEYFILE="/etc/${INST_NAME}/LCWA_d.txt"				# Key file for shared dropbox folder for posting results
-#~ LCWA_OKLA_SRVRID=18002										# Okla speedtest server ID: 18002 == CyberMesa
-#~ LCWA_DATADIR="/var/lib/${INST_NAME}/speedfiles"				# Local storage dir for our CSV data
+#~ LCWA_SUPREPO='https://github.com/gharris999/config-lcwa-speed.git'
+#~ LCWA_SUPREPO_BRANCH='origin/master'
+#~ LCWA_LOCALSUPREPO="/usr/local/share/config-${LCWA_SERVICE}"
 
-
-
-
-#~ LCWA_DEBUG="/usr/local/sbin/${INST_NAME}-debug.sh"
-#~ LCWA_UPDATE="/usr/local/sbin/${INST_NAME}-update.sh"
-#~ LCWA_PIDFILE="/var/run/${INST_NAME}/${INST_NAME}.pid"
-#~ LCWA_LOGDIR="/var/log/${INST_NAME}"
+# Conf, data & log storage locations
+#~ LCWA_CONFDIR="/etc/${INST_NAME}"
 #~ LCWA_DATADIR="/var/lib/${INST_NAME}"
-#~ LCWA_LOGFILE="/var/log/${INST_NAME}/${INST_NAME}.log"
-#~ LCWA_VCLOG="${LCWA_LOGDIR}/git.log"
+#~ LCWA_LOGDIR="/var/log/${INST_NAME}"
+#~ LCWA_LOGFILE="${LCWA_LOGDIR}/${INST_NAME}.log"
+#~ LCWA_ERRFILE="${LCWA_LOGDIR}/${INST_NAME}-error.log"
+#~ LCWA_VCLOG="${LCWA_LOGDIR}/${INST_NAME}-update.log"
+
+# Command-line arguments for the daemon
+#~ LCWA_OPTIONS=""
+#~ LCWA_LOGGERID="UB01"													# Prefix that identifies this speedtest logger
+#~ LCWA_TESTFREQ=10														# time between succssive speedtests in minutes
+#~ LCWA_DB_KEYFILE="/etc/${INST_NAME}/LCWA_d.txt"						# Key file for shared dropbox folder for posting results
+#~ LCWA_OKLA_SRVRID=18002												# Okla speedtest server ID: 18002 == CyberMesa
+#~ LCWA_DATADIR="/var/lib/${INST_NAME}/speedfiles"						# Local storage dir for our CSV data
+
+# Command to be launched by the service
+#~ LCWA_DAEMON="$(which python3) ${LCWA_LOCALREPO}/src/test_speed1_3.py"
+
+
+# Service control variables: pid, priority, memory, etc..
+#~ LCWA_PIDFILE="/var/run/${INST_NAME}/${INST_NAME}.pid"
 #~ LCWA_NICE=-19
 #~ LCWA_RTPRIO=45
 #~ LCWA_MEMLOCK=infinity
 #~ LCWA_CLEARLOG=1
+
+# Utility Scripts
+#~ LCWA_DEBUG="/usr/local/sbin/${INST_NAME}-debug.sh"
+#~ LCWA_UPDATE="/usr/local/sbin/${INST_NAME}-update.sh"
+
+# Other essential environmental variables
 #~ PYTHONPATH=/usr/local/lib/python2.7/site-packages
 #~ HOME="/var/lib/${INST_NAME}"
 
 LCWA_SERVICE=
 LCWA_PRODUCT=
+LCWA_DESC=
 LCWA_PRODUCTID=
 LCWA_VERSION=
+
 LCWA_USER=
 LCWA_GROUP=
+
 LCWA_REPO=
-LCWA_DESC=
+LCWA_REPO_BRANCH=
 LCWA_LOCALREPO=
-LCWA_DAEMON=
+
+LCWA_SUPREPO=
+LCWA_SUPREPO_BRANCH=
+LCWA_LOCALSUPREPO=
+
+LCWA_CONFDIR=
+LCWA_DATADIR=
+LCWA_LOGDIR=
+LCWA_LOGFILE=
+LCWA_ERRFILE=
+LCWA_VCLOG=
+
 LCWA_OPTIONS=
 LCWA_LOGGERID=
 LCWA_TESTFREQ=
 LCWA_DB_KEYFILE=
 LCWA_OKLA_SRVRID=
-LCWA_DEBUG=
-LCWA_UPDATE=
+
+LCWA_DAEMON=
+LCWA_EXEC_ARGS=
+LCWA_EXEC_ARGS_DEBUG=
+
 LCWA_PIDFILE=
-LCWA_DATADIR=
-LCWA_LOGDIR=
-LCWA_LOGFILE=
-LCWA_VCLOG=
 LCWA_NICE=
 LCWA_RTPRIO=
 LCWA_MEMLOCK=
 LCWA_CLEARLOG=
-#~ PYTHONPATH=
 
+LCWA_DEBUG=
+LCWA_UPDATE=
+
+#~ PYTHONPATH=
+#~ HOME=
 
 
 env_vars_name(){
 	echo "LCWA_SERVICE" \
 "LCWA_PRODUCT" \
+"LCWA_DESC" \
 "LCWA_PRODUCTID" \
 "LCWA_VERSION" \
 "LCWA_USER" \
 "LCWA_GROUP" \
 "LCWA_REPO" \
-"LCWA_DESC" \
+"LCWA_REPO_BRANCH" \
 "LCWA_LOCALREPO" \
-"LCWA_DAEMON" \
+"LCWA_SUPREPO" \
+"LCWA_SUPREPO_BRANCH" \
+"LCWA_LOCALSUPREPO" \
+"LCWA_CONFDIR" \
+"LCWA_DATADIR" \
+"LCWA_LOGDIR" \
+"LCWA_LOGFILE" \
+"LCWA_ERRFILE" \
+"LCWA_VCLOG" \
 "LCWA_OPTIONS" \
 "LCWA_LOGGERID" \
 "LCWA_TESTFREQ" \
 "LCWA_DB_KEYFILE" \
 "LCWA_OKLA_SRVRID" \
-"LCWA_DEBUG" \
-"LCWA_UPDATE" \
+"LCWA_DAEMON" \
+"LCWA_EXEC_ARGS" \
+"LCWA_EXEC_ARGS_DEBUG" \
 "LCWA_PIDFILE" \
-"LCWA_DATADIR" \
-"LCWA_LOGDIR" \
-"LCWA_LOGFILE" \
-"LCWA_VCLOG" \
 "LCWA_NICE" \
 "LCWA_RTPRIO" \
 "LCWA_MEMLOCK" \
 "LCWA_CLEARLOG" \
-"LCWA_EXEC_ARGS" \
-"LCWA_EXEC_ARGS_DEBUG" \
+"LCWA_DEBUG" \
+"LCWA_UPDATE" \
 "PYTHONPATH" \
 "HOME"
 }
@@ -199,35 +250,46 @@ env_vars_defaults_get(){
 
 	[ -z "$LCWA_SERVICE" ] 			&& LCWA_SERVICE="$INST_NAME"
 	[ -z "$LCWA_PRODUCT" ] 			&& LCWA_PRODUCT="$(echo "$INST_NAME" |  tr [a-z] [A-Z])"
+	[ -z "$LCWA_DESC" ] 			&& LCWA_DESC="${LCWA_PRODUCT}-TEST Logger"
+	[ -z "$LCWA_PRODUCTID" ] 		&& LCWA_PRODUCTID="f1a4af09-977c-458a-b3f7-f530fb9029c1"
+	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200511.223900
+	
 	[ -z "$LCWA_USER" ] 			&& LCWA_USER="$INST_USER"
 	[ -z "$LCWA_GROUP" ] 			&& LCWA_GROUP="$INST_GROUP"
 
 	[ -z "$LCWA_REPO" ] 			&& LCWA_REPO='https://github.com/pabloemma/LCWA.git'
-	#~ [ -z "$LCWA_REPO" ] 			&& LCWA_REPO='https://github.com/gharris999/LCWA.git'
-
-	[ -z "$LCWA_DESC" ] 			&& LCWA_DESC="${LCWA_PRODUCT}-TEST Logger"
+	[ -z "$LCWA_REPO_BRANCH" ] 		&& LCWA_REPO_BRANCH='origin/master'
 	[ -z "$LCWA_LOCALREPO" ] 		&& LCWA_LOCALREPO="$INST_PATH"
-	[ -z "$LCWA_DAEMON" ] 			&& LCWA_DAEMON="$INST_BIN"
 	
-	[ -z "$LCWA_LOGGERID" ] 		&& LCWA_LOGGERID="$(hostname | cut -c1-4)"
-	[ -z "$LCWA_TESTFREQ" ]			&& LCWA_TESTFREQ='10'
-	[ -z "$LCWA_DB_KEYFILE" ]		&& LCWA_DB_KEYFILE="/etc/${INST_NAME}/LCWA_d.txt"
-	[ -z "$LCWA_OKLA_SRVRID" ]		&& LCWA_OKLA_SRVRID='18002'
+	[ -z "$LCWA_SUPREPO" ] 			&& LCWA_SUPREPO='https://github.com/gharris999/config-lcwa-speed.git'
+	[ -z "$LCWA_SUPREPO_BRANCH" ] 	&& LCWA_SUPREPO_BRANCH='origin/master'
+	[ -z "$LCWA_LOCALSUPREPO" ] 	&& LCWA_LOCALSUPREPO="$SUPINST_PATH"
 
-	[ -z "$LCWA_DEBUG" ]			&& LCWA_DEBUG="/usr/local/sbin/${INST_NAME}-debug.sh"
-	[ -z "$LCWA_UPDATE" ]			&& LCWA_UPDATE="/usr/local/sbin/${INST_NAME}-update.sh"
-	
+	[ -z "$LCWA_CONFDIR" ] 			&& LCWA_CONFDIR="/etc/${INST_NAME}"
 	[ -z "$LCWA_DATADIR" ] 			&& LCWA_DATADIR="/var/lib/${INST_NAME}/speedfiles"
 	[ -z "$LCWA_LOGDIR" ] 			&& LCWA_LOGDIR="/var/log/${INST_NAME}"
-	[ -z "$LCWA_LOGFILE" ] 			&& LCWA_LOGFILE="/var/log/${INST_NAME}/${INST_NAME}.log"
-	[ -z "$LCWA_VCLOG" ] 			&& LCWA_VCLOG="${LCWA_LOGDIR}/git.log"
+	[ -z "$LCWA_LOGFILE" ] 			&& LCWA_LOGFILE="${LCWA_LOGDIR}/${INST_NAME}.log"
+	[ -z "$LCWA_ERRFILE" ] 			&& LCWA_ERRFILE="${LCWA_LOGDIR}/${INST_NAME}-error.log"
+	[ -z "$LCWA_VCLOG" ] 			&& LCWA_VCLOG="${LCWA_LOGDIR}/${INST_NAME}-update.log"
+	
+	[ -z "$LCWA_OPTIONS" ] 			&& LCWA_OPTIONS=""
+	[ -z "$LCWA_LOGGERID" ] 		&& LCWA_LOGGERID="$(hostname | cut -c1-4)"
+	[ -z "$LCWA_TESTFREQ" ]			&& LCWA_TESTFREQ='10'
+	[ -z "$LCWA_DB_KEYFILE" ]		&& LCWA_DB_KEYFILE="${LCWA_CONFDIR}/LCWA_d.txt"
+	[ -z "$LCWA_OKLA_SRVRID" ]		&& LCWA_OKLA_SRVRID='18002'
+
+	[ -z "$LCWA_DAEMON" ] 			&& LCWA_DAEMON="$INST_BIN"
+	[ -z "$LCWA_EXEC_ARGS" ] 		&& LCWA_EXEC_ARGS="--time \${LCWA_TESTFREQ} --dpfile \${LCWA_DB_KEYFILE} --serverid \${LCWA_OKLA_SRVRID}"
+	[ -z "$LCWA_EXEC_ARGS_DEBUG" ] 	&& LCWA_EXEC_ARGS_DEBUG="--adebug --time \${LCWA_TESTFREQ} --dpfile \${LCWA_DB_KEYFILE} --serverid \${LCWA_OKLA_SRVRID}"
+	
 	[ -z "$LCWA_NICE" ] 			&& LCWA_NICE="$INST_NICE"
 	[ -z "$LCWA_RTPRIO" ]			&& LCWA_RTPRIO="$INST_RTPRIO"
 	[ -z "$LCWA_MEMLOCK" ]			&& LCWA_MEMLOCK="$INST_MEMLOCK"
 	[ -z "$LCWA_CLEARLOG" ] 		&& LCWA_CLEARLOG=1
-	[ -z "$LCWA_EXEC_ARGS" ] 		&& LCWA_EXEC_ARGS="--time \${LCWA_TESTFREQ} --dpfile \${LCWA_DB_KEYFILE} --serverid \${LCWA_OKLA_SRVRID}"
-	[ -z "$LCWA_EXEC_ARGS_DEBUG" ] 	&& LCWA_EXEC_ARGS_DEBUG="--adebug --time \${LCWA_TESTFREQ} --dpfile \${LCWA_DB_KEYFILE} --serverid \${LCWA_OKLA_SRVRID}"
 
+	[ -z "$LCWA_DEBUG" ]			&& LCWA_DEBUG="/usr/local/sbin/${INST_NAME}-debug.sh"
+	[ -z "$LCWA_UPDATE" ]			&& LCWA_UPDATE="/usr/local/sbin/${INST_NAME}-update.sh"
+	
 	[ -z "$PYTHONPATH" ] 			&& PYTHONPATH="$(find /usr -type d -name 'site-packages' -exec readlink -f {} \; | head -n 1)"
 	
 	# Andi's python code needs this variable
@@ -258,7 +320,7 @@ db_keyfile_install(){
 		rm -f "$LCWA_DB_KEYFILE"
 	fi
 	
-	error_echo "Creating dropbox key file ${LCWA_DB_KEYFILE} from encrypted source."
+	error_echo "Creating dropbox key file ${LCWA_DB_KEYFILE} from encrypted source.  Please enter the password when prompted."
 	echo "U2FsdGVkX18fLV7OVTsMgF+SrMMI05OFtrQcRur6KZ7Ft2+eaC7rRkBJ/stnDggVFro27mMsM2CM4Y4WXEwVuAV9LcajUN+UI0e7e0q3ymYqajoHnX/TBjdUqiEYMNbO" | openssl enc -aes-256-cbc -pbkdf2 -d -a -out "$LCWA_DB_KEYFILE"
 	
 }
@@ -567,12 +629,7 @@ python_libs_remove(){
 		[ $TEST_MODE -lt 1 ] && apt_uninstall	python3-tk \
 												python3-gi-cairo
 		
-		error_echo "Installing python dependencies.." 
-
-		#~ [ $TEST_MODE -lt 1 ] && pip3 install --force-reinstall backports.functools_lru_cache \
-										#~ dropbox \
-										#~ cairocffi \
-										#~ matplotlib
+		error_echo "Installing python3 libraries.." 
 
 		[ $TEST_MODE -lt 1 ] && pip3 uninstall --yes testresources
 		[ $TEST_MODE -lt 1 ] && pip3 uninstall --yes backports.functools_lru_cache
@@ -604,21 +661,22 @@ inst_dir_create(){
 # inst_dir_remove() Remove the service install dir..
 ######################################################################################################
 inst_dir_remove(){
-	INST_PATH="$LCWA_LOCALREPO"
-	if [ -d "$INST_PATH" ]; then
-		echo "Removing ${INST_PATH}.."
-		rm -Rf "$INST_PATH"
+	local LINST_PATH="$1"
+	if [ -d "$LINST_PATH" ]; then
+		echo "Removing ${LINST_PATH}.."
+		rm -Rf "$LINST_PATH"
 	fi
 
 }
-
 
 #------------------------------------------------------------------------------
 # in_repo() -- Check to see we are where we are supposed to be..
 #------------------------------------------------------------------------------
 in_repo(){
-	if [ $(pwd) != "$LCWA_LOCALREPO" ]; then
-		echo "Error: Could not find ${LCWA_LOCALREPO}"
+	local LLOCAL_REPO="$1"
+	
+	if [ $(pwd) != "$LLOCAL_REPO" ]; then
+		echo "Error: Could not find ${LLOCAL_REPO}"
 		echo "${SCRIPTNAME} must exit.."
 		exit 1
 	fi
@@ -632,22 +690,26 @@ in_repo(){
 #                      0: repo exists -- update it
 #------------------------------------------------------------------------------
 git_repo_check(){
-	if [ ! -d "${LCWA_LOCALREPO}/.git" ]; then
-		error_echo "${LCWA_LOCALREPO} does not exist or is not a git repository."
+	local LREMOTE_REPO="$1"
+	local LLOCAL_REPO="$2"
+	local LTHIS_REPO=
+	
+	if [ ! -d "${LLOCAL_REPO}/.git" ]; then
+		error_echo "${LLOCAL_REPO} does not exist or is not a git repository."
 		# local repo does not exist..set return value to create it
 		return 10
 	fi
 
-	cd "$LCWA_LOCALREPO" && in_repo
+	cd "$LLOCAL_REPO" && in_repo
 	# Get the URL of the fetch origin of the clone..
-	THISREPO=$(git remote -v show | grep 'fetch' | sed -n -e 's/^origin *\([^ ]*\).*$/\1/p')
-	THISREPO=$(echo "$THISREPO" | sed -e 's/^[[:space:]]*//')
-	THISREPO=$(echo "$THISREPO" | sed -e 's/[[:space:]]*$//')
+	LTHIS_REPO=$(git remote -v show | grep 'fetch' | sed -n -e 's/^origin *\([^ ]*\).*$/\1/p')
+	LTHIS_REPO=$(echo "$LTHIS_REPO" | sed -e 's/^[[:space:]]*//')
+	LTHIS_REPO=$(echo "$LTHIS_REPO" | sed -e 's/[[:space:]]*$//')
 
 	# We don't care if the source is http:// or git://
-	if [ "${THISREPO##*//}" != "${LCWA_REPO##*//}" ]; then
-		echo "Error: ${LCWA_LOCALREPO} is not a git repository for ${LCWA_REPO}."
-		echo "  git reports ${THISREPO} as the source."
+	if [ "${LTHIS_REPO##*//}" != "${LREMOTE_REPO##*//}" ]; then
+		echo "Error: ${LLOCAL_REPO} is not a git repository for ${LREMOTE_REPO}."
+		echo "  git reports ${LTHIS_REPO} as the source."
 		return 5
 	fi
 
@@ -659,12 +721,14 @@ git_repo_check(){
 # git_repo_show() -- show the status of the local repo
 #------------------------------------------------------------------------------
 git_repo_show() {
-	echo "Getting ${LCWA_LOCALREPO} status.."
-	cd "$LCWA_LOCALREPO" && in_repo
+	local LLOCAL_REPO="$1"
+
+	echo "Getting ${LLOCAL_REPO} status.."
+	cd "$LLOCAL_REPO" && in_repo "$LLOCAL_REPO"
 	git remote show origin
-	echo "Available brances in ${LCWA_LOCALREPO}:"
+	echo "Available brances in ${LLOCAL_REPO}:"
 	git branch -r
-	echo "Status of ${LCWA_LOCALREPO}:"
+	echo "Status of ${LLOCAL_REPO}:"
 	git status
 }
 
@@ -673,76 +737,116 @@ git_repo_show() {
 # git_repo_clone() -- Clone the remote repo locally..
 #------------------------------------------------------------------------------
 git_repo_clone(){
-	echo "Cloning ${LCWA_REPO} to ${LCWA_LOCALREPO}.."
+	local LREMOTE_REPO="$1"
+	local LLOCAL_REPO="$2"
+	
+	echo "Cloning ${LREMOTE_REPO} to ${LLOCAL_REPO}.."
 	# Cloning to --depth 1 (i.e. only most recent revs) results in a dirsize of
 	# about 250M for /usr/share/lms/server
 	if [ $ALLREVS -gt 0 ]; then
-		git clone "$LCWA_REPO" "$LCWA_LOCALREPO"
+		git clone "$LREMOTE_REPO" "$LLOCAL_REPO"
 	else
-		git clone --depth 1 "$LCWA_REPO" "$LCWA_LOCALREPO"
+		git clone --depth 1 "$LREMOTE_REPO" "$LLOCAL_REPO"
 	fi
 
 	if [ $? -gt 0 ]; then
-		echo "Error cloning ${LCWA_REPO}...script must halt."
+		echo "Error cloning ${LREMOTE_REPO}...script must halt."
 		exit 1
 	fi
 
-	cd "$LCWA_LOCALREPO" && in_repo
-	git status
+	#~ cd "$LLOCAL_REPO" && in_repo "$LLOCAL_REPO"
+	#~ git status
+	
+	git_repo_show "$LLOCAL_REPO"
 }
 
 #------------------------------------------------------------------------------
 # git_repo_checkout() -- Check out the desired branch..
 #------------------------------------------------------------------------------
 git_repo_checkout(){
-	echo "Checking out branch ${LCWA_BRANCH} to ${LCWA_LOCALREPO}.."
+	local LBRANCH="$1"
+	local LLOCAL_REPO="$2"
 
-	cd "$LCWA_LOCALREPO" && in_repo
+	echo "Checking out branch ${LBRANCH} to ${LLOCAL_REPO}.."
+
+	cd "$LLOCAL_REPO" && in_repo "$LLOCAL_REPO"
 
 	#check out the new branch..
-	git checkout "$LCWA_BRANCH"
+	git checkout "$LBRANCH"
 
 	if [ $? -gt 0 ]; then
-		echo "Error checking out branch ${LCWA_BRANCH}."
-		git_repo_show
+		echo "Error checking out branch ${LBRANCH}."
+		git_repo_show "$LLOCAL_REPO"
 		return 1
 	fi
+}
+
+#------------------------------------------------------------------------------
+# get_repo_create() -- Check and Update or Clone the repo locally and check out a branch
+#------------------------------------------------------------------------------
+git_repo_create(){
+	local LREMOTE_REPO="$1"
+	local LREMOTE_BRANCH="$2"
+	local LLOCAL_REPO="$3"
+	
+	# Check and install or update the main repo..
+	git_repo_check "$LREMOTE_REPO" "$LLOCAL_REPO"
+	
+	REPOSTAT=$?
+	if [ $REPOSTAT -eq 10 ]; then
+		# local repo does not exist...create it..
+		#~ get_repo_create "$LCWA_REPO" "$LCWA_REPO_BRANCH" "$LCWA_LOCALREPO"
+		git_repo_clone "$LREMOTE_REPO" "$LLOCAL_REPO"
+		git_repo_checkout "$LREMOTE_BRANCH" "$LLOCAL_REPO"
+	elif [ $REPOSTAT -eq 5 ]; then
+		# wrong repo!  Exit!
+		git_repo_show "$LREMOTE_REPO" "$LLOCAL_REPO"
+		exit 1
+	else
+		# local repo exists...update it..
+		git_repo_clean "$LREMOTE_REPO" "$LLOCAL_REPO"
+		git_repo_update "$LREMOTE_REPO" "$LLOCAL_REPO"
+	fi
+
 }
 
 #------------------------------------------------------------------------------
 # git_repo_clean() -- Discard any local changes from the repo..
 #------------------------------------------------------------------------------
 git_repo_clean(){
-	cd "$LCWA_LOCALREPO" && in_repo
-	echo "Cleaning ${LCWA_LOCALREPO}.."
+	local LLOCAL_REPO="$1"
+	cd "$LLOCAL_REPO" && in_repo "$LLOCAL_REPO"
+	echo "Cleaning ${LLOCAL_REPO}.."
 	git reset --hard
 	git clean -fd
 	if [ $? -gt 0 ]; then
-		echo "Error cleaning ${LCWA_LOCALREPO}...script must halt."
+		echo "Error cleaning ${LLOCAL_REPO}...script must halt."
 		exit 1
 	fi
 }
 
 #------------------------------------------------------------------------------
-# git_repo_update() -- update the git repo
+# git_repo_update() -- update the local git repo
 #------------------------------------------------------------------------------
 git_repo_update(){
-	cd "$LCWA_LOCALREPO" && in_repo
-	echo "Updating ${LCWA_LOCALREPO}.."
+	local LLOCAL_REPO="$1"
+	cd "$LLOCAL_REPO" && in_repo "$LLOCAL_REPO"
+	error_echo "Updating ${LLOCAL_REPO}.."
 	git pull
 	if [ $? -gt 0 ]; then
-		echo "Error updating ${LCWA_LOCALREPO}...script must halt."
+		echo "Error updating ${LLOCAL_REPO}...script must halt."
 		exit 1
 	fi
 }
 
 #------------------------------------------------------------------------------
-# git_repo_update() -- update the git repo
+# git_repo_remove() -- delete the local repo
 #------------------------------------------------------------------------------
 git_repo_remove(){
-	if [ -d "$LCWA_LOCALREPO" ]; then
-		echo "Removing ${LCWA_LOCALREPO} git local repo.."
-		rm -Rf "$LCWA_LOCALREPO"
+	local LLOCAL_REPO="$1"
+	if [ -d "$LLOCAL_REPO" ]; then
+		error_echo "Removing ${LLOCAL_REPO} git local repo.."
+		rm -Rf "$LLOCAL_REPO"
 	fi
 }
 
@@ -754,75 +858,9 @@ script_debug_create(){
 
 	[ -z "$LCWA_DEBUG" ]			&& LCWA_DEBUG="/usr/local/sbin/${INST_NAME}-debug.sh"
 
-    echo "Creating ${LCWA_DEBUG}.."
+    error_echo "Creating ${LCWA_DEBUG}.."
 
 cat >"$LCWA_DEBUG" <<DEBUG_SCR1;
-#!/bin/bash
-# lcwa-speed-debug.sh -- script to debug lcwa-speed startup..
-
-DEBUG=1
-FORCE=0
-
-USE_UPSTART=0
-USE_SYSTEMD=0
-USE_SYSV=1
-
-IS_DEBIAN="\$(which apt-get 2>/dev/null | wc -l)"
-IS_UPSTART=\$(initctl version 2>/dev/null | egrep -c 'upstart')
-IS_SYSTEMD=\$(systemctl --version 2>/dev/null | egrep -c 'systemd')
-
-INST_NAME=
-
-date_msg(){
-	DATE=\$(date '+%F %H:%M:%S.%N')
-	DATE=\${DATE#??}
-	DATE=\${DATE%?????}
-	echo "[\${DATE}] \$(basename \$0) (\$\$)" \$@
-}
-
-env_file_read(){
-
-	if [ \$IS_DEBIAN -gt 0 ]; then
-		INST_ENVFILE="/etc/default/\${INST_NAME}"
-	else
-		INST_ENVFILE="/etc/sysconfig/\${INST_NAME}"
-	fi
-
-	if [ -f "\$INST_ENVFILE" ]; then
-		. "\$INST_ENVFILE"
-	else
-		date_msg "Error: Could not read \${INST_ENVFILE}."
-		return 128
-	fi
-	
-	if [ \$DEBUG -gt 0 ]; then
-	
-		set -o posix ; set | grep 'LCWA_' | sort
-	fi
-}
-
-
-########################################################################
-########################################################################
-########################################################################
-# main()
-########################################################################
-########################################################################
-########################################################################
-
-INST_NAME='lcwa-speed'
-
-env_file_read
-
-# Prep the debug log
-DEBUG_LOGFILE="\${LCWA_LOGDIR}/\${INST_NAME}-debug.log"
-touch "\$DEBUG_LOGFILE"
-#~ truncate --size=0 "\$DEBUG_LOGFILE"
-date_msg "\$@" >"\$DEBUG_LOGFILE"
-
-# Execute the service..
-\$LCWA_DAEMON \$LCWA_EXEC_ARGS_DEBUG 2>&1 | tee -a "\$DEBUG_LOGFILE"
-
 
 DEBUG_SCR1
 chmod 755 "$LCWA_DEBUG"
@@ -837,7 +875,7 @@ script_debug_remove(){
 	[ -z "$LCWA_DEBUG" ]			&& LCWA_DEBUG="/usr/local/sbin/${INST_NAME}-debug.sh"
 
 	if [ -f "$LCWA_DEBUG" ]; then
-		echo "Removing ${LCWA_DEBUG}.."
+		error_echo "Removing ${LCWA_DEBUG}.."
 		rm "$LCWA_DEBUG"
 	fi
 
@@ -850,439 +888,9 @@ script_update_create(){
 
 	[ -z "$LCWA_UPDATE" ]		&& LCWA_UPDATE="/usr/local/sbin/${INST_NAME}-update.sh"
 
-    echo "Creating ${LCWA_UPDATE}.."
+    error_echo "Creating ${LCWA_UPDATE}.."
 
 cat >"$LCWA_UPDATE" <<UPDATE_SCR1;
-#!/bin/bash
-# lcwa-speed-update.sh -- script to update lcwa-speed git repo and restart service..
-# Version Control for this script
-VERSION=20200430.01
-
-SCRIPT="\$(readlink -f "\$0")"
-SCRIPT_NAME="\$(basename "\$0")"
-DEBUG=0
-VERBOSE=0
-FORCE=0
-
-SCRIPT_UPDATE=1
-SBIN_UPDATE=0
-OS_UPDATE=0
-REBOOT=0
-
-USE_UPSTART=0
-USE_SYSTEMD=0
-USE_SYSV=1
-
-IS_DEBIAN="\$(which apt-get 2>/dev/null | wc -l)"
-IS_UPSTART=\$(initctl version 2>/dev/null | egrep -c 'upstart')
-IS_SYSTEMD=\$(systemctl --version 2>/dev/null | egrep -c 'systemd')
-
-####################################################################################
-# Requirements: do we have the utilities needed to get the job done?
-TIMEOUT_BIN=\$(which timeout)
-
-if [ -z "\$TIMEOUT_BIN" ]; then
-	TIMEOUT_BIN=\$(which gtimeout)
-fi
-
-PROC_TIMEOUT=60
-
-# Prefer upstart to systemd if both are installed..
-if [ \$IS_UPSTART -gt 0 ]; then
-	USE_SYSTEMD=0
-	USE_SYSV=0
-	USE_UPSTART=1
-elif [ \$IS_SYSTEMD -gt 0 ]; then
-	USE_SYSTEMD=1
-	USE_SYSV=0
-	USE_UPSTART=0
-fi
-
-psgrep(){
-    ps aux | grep -v grep | grep -E \$*
-}
-
-error_exit(){
-    echo "Error: \$@" 1>&2;
-    exit 1
-}
-
-error_echo(){
-	echo "\$@" 1>&2;
-}
-
-
-date_msg(){
-	DATE=\$(date '+%F %H:%M:%S.%N')
-	DATE=\${DATE#??}
-	DATE=\${DATE%?????}
-	echo "[\${DATE}] \${SCRIPT_NAME} (\$\$)" \$@
-}
-
-log_msg(){
-	error_echo "\$@"
-	date_msg "\$@" >> "\$LCWA_VCLOG"
-}
-
-
-########################################################################
-# disp_help() -- display the getopts allowable args
-########################################################################
-disp_help(){
-	local EXTRA_ARGS="\$*"
-	error_echo "Syntax: \$(basename "\$SCRIPT") \${EXTRA_ARGS} \$(echo "\$SHORTARGS" | sed -e 's/, //g' -e 's/\\(.\\)/[-\\1] /g') \$(echo "[--\${LONGARGS}]" | sed -e 's/,/] [--/g' | sed -e 's/:/=entry/g')" 
-}
-
-
-env_file_read(){
-
-	if [ \$IS_DEBIAN -gt 0 ]; then
-		INST_ENVFILE="/etc/default/\${INST_NAME}"
-	else
-		INST_ENVFILE="/etc/sysconfig/\${INST_NAME}"
-	fi
-
-	if [ -f "\$INST_ENVFILE" ]; then
-		. "\$INST_ENVFILE"
-	else
-		log_msg "Error: Could not read \${INST_ENVFILE}."
-		return 128
-	fi
-}
-
-######################################################################################################
-# date_epoch_to_iso8601() -- Convert an epoch time to ISO-8601 format in local TZ..
-######################################################################################################
-date_epoch_to_iso8601(){
-	local LEPOCH="\$1"
-	echo "\$(date -d "@\${LEPOCH}" --iso-8601=s)"
-}
-
-######################################################################################################
-# date_epoch_to_iso8601u() -- Convert an epoch time to ISO-8601 format in UTC..
-######################################################################################################
-date_epoch_to_iso8601u(){
-	local LEPOCH="\$1"
-	echo "\$(date -u -d "@\${LEPOCH}" --iso-8601=s)"
-}
-
-function displaytime {
-  local T=\$1
-  local D=\$((T/60/60/24))
-  local H=\$((T/60/60%24))
-  local M=\$((T/60%60))
-  local S=\$((T%60))
-  (( \$D > 0 )) && printf '%d days ' \$D
-  (( \$H > 0 )) && printf '%d hours ' \$H
-  (( \$M > 0 )) && printf '%d minutes ' \$M
-  (( \$D > 0 || \$H > 0 || \$M > 0 )) && printf 'and '
-  printf '%d seconds\\n' \$S
-}
-
-script_update(){
-	# Get date of ourselves..
-	# Get date of file..
-	local LURL='http://www.hegardtfoundation.org/slimstuff/Services.zip'
-	#~ SCRIPT='/usr/local/sbin/lcwa-speed-update.sh'
-	local REMOT_FILEDATE=
-	local LOCAL_FILEDATE=
-	local REMOT_EPOCH=
-	local LOCAL_EPOCH=
-	local TEMPFILE=
-
-	log_msg "Checking \${SCRIPT} to see if update of the update is needed.."
-	
-	# Remote file time here: 5/1/2020 14:01
-	REMOT_FILEDATE="\$(curl -s -v -I -X HEAD http://www.hegardtfoundation.org/slimstuff/Services.zip 2>&1 | grep -m1 -E "^Last-Modified:")"
-	# Sanitize the filedate, removing tabs, CR, LF
-	REMOT_FILEDATE="\$(echo "\${REMOT_FILEDATE//[\$'\\t\\r\\n']}")"
-	REMOT_FILEDATE="\$(echo "\$REMOT_FILEDATE" | sed -n -e 's/^Last-Modified: \\(.*\$\\)/\\1/p')"
-	REMOT_EPOCH="\$(date "-d\${REMOT_FILEDATE}" +%s)"
-	
-	LOCAL_FILEDATE="\$(stat -c %y \${SCRIPT})"
-	LOCAL_EPOCH="\$(date "-d\${LOCAL_FILEDATE}" +%s)"
-	
-	[ \$DEBUG -gt 0 ] && log_msg "Comparing dates"
-	[ \$DEBUG -gt 0 ] && log_msg " Local: [\${LOCAL_EPOCH}] \$(date_epoch_to_iso8601  \${LOCAL_EPOCH})"
-	[ \$DEBUG -gt 0 ] && log_msg "Remote: [\${REMOT_EPOCH}] \$(date_epoch_to_iso8601  \${REMOT_EPOCH})"
-
-	[ \$DEBUG -gt 0 ] && [ \$LOCAL_EPOCH -lt \$REMOT_EPOCH ] && log_msg "Local \${SCRIPT} is older than Remote \${LURL} by \$(displaytime \$(echo "\${REMOT_EPOCH} - \${LOCAL_EPOCH}" | bc))." || log_msg "Local \${SCRIPT} is newer than Remote \${LURL} by \$(displaytime \$(echo "\${LOCAL_EPOCH} - \${REMOT_EPOCH}" | bc))." 
-
-	# Update ourselves if we're older than Services.zip
-	if [ \$LOCAL_EPOCH -lt \$REMOT_EPOCH ]; then
-		date_msg "Updating \${SCRIPT} with new verson.."
-		TEMPFILE="\$(mktemp -u)"
-		# Download the Services.zip file, keeping the file modification date & time
-		wget --quiet -O "\$TEMPFILE" -S "\$LURL" >/dev/null 2>&1
-		if [ -f "\$TEMPFILE" ]; then
-			cd /tmp
-			unzip -u -o -qq "\$TEMPFILE"
-			cd Services
-			./install.sh
-			cd "config-\${INST_NAME}"
-			"./config-\${INST_NAME}.sh" --update
-			cd /tmp
-			rm -Rf ./Services
-			rm "\$TEMPFILE"
-			REBOOT=1
-		fi
-	else
-		log_msg "\${SCRIPT} is up to date."
-	fi
-		
-}
-
-sbin_update(){
-	local LURL='http://www.hegardtfoundation.org/slimstuff/sbin.zip'
-	local TEMPFILE="\$(mktemp)"
-
-	log_msg "Downloading updated utility scripts.."
-
-	# Download the sbin.zip file, keeping the file modification date & time
-	wget --quiet -O "\$TEMPFILE" -S "\$LURL" >/dev/null 2>&1
-	
-	if [ -f "\$TEMPFILE" ]; then
-		log_msg "Updating \${SCRIPT} with new verson.."
-		cd /tmp
-		#~ unzip -u -o -qq "\$TEMPFILE" -d /usr/local
-		unzip -u -o "\$TEMPFILE" -d /usr/local
-		rm "\$TEMPFILE"
-	fi
-	
-}
-
-service_stop() {
-	echo "Stopping \${INST_NAME} service.."
-	if [ \$USE_UPSTART -gt 0 ]; then
-		initctl stop "\$INST_NAME" >/dev/null 2>&1
-	elif [ \$USE_SYSTEMD -gt 0 ]; then
-		systemctl stop "\${INST_NAME}.service" >/dev/null 2>&1
-	else
-		if [ \$IS_DEBIAN -gt 0 ]; then
-			service "\$INST_NAME" stop >/dev/null 2>&1
-		else
-			"/etc/rc.d/init.d/\${INST_NAME}" stop >/dev/null 2>&1
-		fi
-	fi
-
-	sleep 2
-
-	# Failsafe stop
-	local LLCWA_PID=\$(pgrep -fn "\$LCWA_DAEMON")
-
-	if [ ! -z "\$LLCWA_PID" ]; then
-		kill -9 "\$LLCWA_PID"
-	fi
-
-	return \$?
-}
-
-service_start() {
-	echo "Starting \${INST_NAME} service.."
-	if [ \$USE_UPSTART -gt 0 ]; then
-		initctl start "\$INST_NAME" >/dev/null 2>&1
-	elif [ \$USE_SYSTEMD -gt 0 ]; then
-		systemctl start "\${INST_NAME}.service" >/dev/null 2>&1
-	else
-		if [ \$IS_DEBIAN -gt 0 ]; then
-			service "\$INST_NAME" start >/dev/null 2>&1
-		else
-			"/etc/rc.d/init.d/\${INST_NAME}" start >/dev/null 2>&1
-		fi
-	fi
-	return \$?
-}
-
-######################################################################################################
-# service_status() Get the status of the service..
-######################################################################################################
-service_status() {
-	[ \$DEBUG -gt 0 ] && error_echo "\${FUNCNAME} \$@"
-	local LSERVICE="\$1"
-	
-	if [ -z "\$LSERVICE" ]; then
-		LSERVICE="\$INST_NAME"
-	fi
-
-	if [ \$USE_UPSTART -gt 0 ]; then
-		# returns 0 if running, 1 if unknown job
-		initctl status "\$LSERVICE"
-	elif [ \$USE_SYSTEMD -gt 0 ]; then
-		if [ \$(echo "\$LSERVICE" | grep -c -e '.*\\..*') -lt 1 ]; then
-			LSERVICE="\${LSERVICE}.service"
-		fi
-		# returns 0 if service running; returns 3 if service is stopped, dead or not installed..
-		systemctl --no-pager status "\$LSERVICE"
-	else
-		# returns 0 if service is running, returns 1 if unrecognized service
-		if [ \$IS_DEBIAN -gt 0 ]; then
-			service "\$LSERVICE" status
-		else
-			"/etc/rc.d/init.d/\${LSERVICE}" status
-		fi
-	fi
-	return \$?
-}
-
-
-
-#---------------------------------------------------------------------------
-# Check to see we are where we are supposed to be..
-git_in_repo(){
-	if [ \$(pwd) != "\$LCWA_LOCALREPO" ]; then
-		log_msg "Error: \${LCWA_LOCALREPO} not found."
-		return 128
-	fi
-}
-
-#---------------------------------------------------------------------------
-# Discard any local changes from the repo..
-git_clean(){
-	cd "\$LCWA_LOCALREPO" && git_in_repo
-	log_msg "Cleaning \${LCWA_LOCALREPO}"
-	if [ -d './.git' ]; then
-		git reset --hard
-		git clean -fd
-	elif [ -d './.svn' ]; then
-		svn revert -R .
-	fi
-}
-
-#---------------------------------------------------------------------------
-# Update the repo..
-git_update(){
-	cd "\$LCWA_LOCALREPO" && git_in_repo
-	log_msg "Updating \${LCWA_LOCALREPO}"
-	if [ -d './.git' ]; then
-		git pull | tee -a "\$LCWA_VCLOG"
-	elif [ -d './.svn' ]; then
-		svn up | tee -a "\$LCWA_VCLOG"
-	fi
-	return \$?
-}
-
-git_check_up_to_date(){
-	cd "\$LCWA_LOCALREPO" && git_in_repo
-	if [ -d './.git' ]; then
-		# http://stackoverflow.com/questions/3258243/git-check-if-pull-needed
-		log_msg "Checking \${LCWA_DESC} to see if update is needed.."
-		if [ \$(\$TIMEOUT_BIN \$PROC_TIMEOUT git remote -v update 2>&1 | egrep -c "\\[up to date\\]") -gt 0 ]; then
-			log_msg "Local repository \${LCWA_LOCALREPO} is up to date."
-			return 0
-		else
-			log_msg "Local repository \${LCWA_LOCALREPO} requires update."
-			return 1
-		fi
-	fi
-}
-
-git_update_do() {
-	git_clean
-	git_update && status=0 || status=\$?
-	if [ \$status -eq 0 ]; then
-		log_msg "\${LCWA_DESC} has been updated."
-	else
-		log_msg "Error updating \${LCWA_DESC}."
-	fi
-}
-
-sleep_random(){
-	local FLOOR="\$1"
-	local CEILING="\$2"
-	local RANGE=\$((\$CEILING-\$FLOOR+1));
-	local RESULT=\$RANDOM;
-	let "RESULT %= \$RANGE";
-	RESULT=\$((\$RESULT+\$FLOOR));
-	log_msg "Waiting \${RESULT} seconds before restarting service.."
-	sleep \$RESULT
-}
-
-################################################################################
-################################################################################
-# main()
-################################################################################
-################################################################################
-
-# Process cmd line args..
-SHORTARGS='hdvf'
-LONGARGS='help,debug,verbose,force,script-update,no-script-update,sbin-update,os-update'
-ARGS=\$(getopt -o "\$SHORTARGS" -l "\$LONGARGS"  -n "\$(basename \$0)" -- "\$@")
-
-eval set -- "\$ARGS"
-
-while [ \$# -gt 0 ]; do
-	case "\$1" in
-		--)
-			;;
-		-h|--help)
-			disp_help
-			exit 0
-			;;
-		-d|--debug)
-			DEBUG=1
-			;;
-		-v|--verbose)
-			VERBOSE=1
-			;;
-		-f|--force)
-			FORCE=1
-			;;
-		--script-update)
-			SCRIPT_UPDATE=1
-			;;
-		--no-script-update)
-			SCRIPT_UPDATE=0
-			;;
-		--sbin-update)
-			SBIN_UPDATE=1
-			;;
-		--os-update)
-			OS_UPDATE=1
-			;;
-		*)
-			log_msg "Error: unrecognized option \${1}."
-			;;
-	esac
-	shift
-done
-
-INST_NAME=lcwa-speed
-
-# Get our environmental variables..
-env_file_read
-
-# See if we need to update this update script..
-if [ \$SCRIPT_UPDATE -gt 0 ]; then
-	script_update
-fi
-
-if [ \$SBIN_UPDATE -gt 0 ]; then
-	sbin_update
-fi
-
-if [ \$OS_UPDATE -gt 0 ]; then
-	log_msg "Updating operating system.."
-	service_stop
-	apt-upgrade
-fi
-
-# Check Andi's repo to see if there are updates..
-git_check_up_to_date
-
-if [[ \$? -gt 0 ]] || [[ \$FORCE -gt 0 ]]; then
-	service_stop
-	git_update_do
-fi
-
-if [ \$REBOOT -gt 0 ]; then
-	log_msg "\${SCRIPT} requries a reboot of this system!"
-	shutdown -r 1 "\${SCRIPT} requries a reboot of this system!"
-else
-	# Sleep for a random number of seconds between 1 a 240 (i.e. 4 minutes)..
-	sleep_random 1 240
-	service_start
-	service_status
-fi
 
 UPDATE_SCR1
 chmod 755 "$LCWA_UPDATE"
@@ -1297,12 +905,11 @@ script_update_remove(){
 	[ -z "$LCWA_UPDATE" ]		&& LCWA_UPDATE="/usr/local/sbin/${INST_NAME}-update.sh"
 
 	if [ -f "$LCWA_UPDATE" ]; then
-		echo "Removing ${LCWA_UPDATE}.."
+		error_echo "Removing ${LCWA_UPDATE}.."
 		rm "$LCWA_UPDATE"
 	fi
 
 }
-
 
 crontab_entry_add(){
 	local COMMENT='#Everyday, at 5 minutes past midnight:'
@@ -1386,6 +993,9 @@ banner_display(){
 		SERVICE_TYPE='sysv'
 	fi
 
+	#~ LCWA_REPO
+	#~ LCWA_REPO_BRANCH
+	#~ LCWA_LOCALREPO
 
 
 	echo '================================================================================='
@@ -1416,7 +1026,7 @@ banner_display(){
 		echo ' '
 		echo "The source for the git clone will be \"${LCWA_REPO}\"."
 		echo ' '
-		echo "The destination for the ${LCWA_BRANCH} code will be \"${LCWA_LOCALREPO}\"."
+		echo "The destination for the ${LCWA_REPO_BRANCH} code will be \"${LCWA_LOCALREPO}\"."
 	fi
 	echo ' '
 	echo ' '
@@ -1455,18 +1065,11 @@ finish_display(){
 		echo ' '
 		echo "${LCWA_UPDATE}"
 		echo ' '
-		echo "Run the command \"${LCWA_SWITCH}\" to see a list"
-		echo "of the available branches in the ${LCWA_LOCALREPO} local repo.  Then run the command"
-		echo "\"${LCWA_SWITCH}\" \"branchname\" using one of the"
-		echo "branches listed to switch to that branch."
 	else
 		echo "Run the command \"service ${INST_NAME} start\" to start the service."
 		echo ' '
 		echo "Run the command \"service ${INST_NAME} update\" to update ${LCWA_LOCALREPO} from ${LCWA_REPO}."
 		echo ' '
-		echo "Run the command \"service ${INST_NAME} list-branches\" to to show the available branches at ${LCWA_LOCALREPO}."
-		echo ' '
-		echo "Run the command \"service ${INST_NAME} switch-branch 'branch-name'\" to check out a new branch from ${LCWA_REPO}."
 	fi
 	echo ' '
 	echo 'Enjoy!'
@@ -1786,10 +1389,6 @@ while [ $# -gt 0 ]; do
 done
 
 ############################################################################################################
-service_priority_set
-
-env_vars_defaults_get
-
 if [ $DEBUG -gt 0 ]; then
 
 	echo "IS_DEBIAN == ${IS_DEBIAN}"
@@ -1857,31 +1456,35 @@ elif [ $CHECKOUT_ONLY -gt 0 ]; then
 # Update
 elif [ $UPDATE -gt 0 ]; then
 
+	# Get our default env var values
+	env_vars_defaults_get
+
 	if [ $FORCE -lt 1 ]; then
 		service_is_installed
 		if [ $? -lt 1 ]; then
 			error_exit "${INST_NAME} is not installed.  Cannot update ${INST_NAME}.."
 		fi
 	fi
-
+	
 	service_stop
 	service_disable
-
-	#~ env_vars_defaults_get
 
 	env_file_create $(env_vars_name)
 	
 	HOME="$CUR_HOME"
 
-
 	env_file_read
 	data_dir_update
 	log_dir_update
 	
-	# Check and update the repo..
+	# Check and update the main repo..
 	git_repo_check && git_repo_update
+	
+	# Check and update the suppliment repo..
 
 	# Create the service init script
+	service_priority_set
+	
 	if [ $USE_UPSTART -gt 0 ]; then
 		upstart_conf_file_create_nopid "$LCWA_EXEC_ARGS"
 	elif [ $USE_SYSTEMD -gt 0 ]; then
@@ -1913,6 +1516,12 @@ elif [ $UPDATE -gt 0 ]; then
 # UNINSTALL
 elif [ $UNINSTALL -gt 0 ]; then
 
+	env_file_read
+	if [ $? -gt 0 ]; then
+		# Get defaults if the env file has already been removed..
+		env_vars_defaults_get
+	fi
+
 	if [ $FORCE -lt 1 ]; then
 		service_is_installed
 
@@ -1923,11 +1532,6 @@ elif [ $UNINSTALL -gt 0 ]; then
 		banner_display
 	fi
 
-	env_file_read
-	if [ $? -gt 0 ]; then
-		# Get defaults if the env file has already been removed..
-		env_vars_defaults_get
-	fi
 
 	HOME="$CUR_HOME"
 
@@ -1939,15 +1543,20 @@ elif [ $UNINSTALL -gt 0 ]; then
 
 	script_debug_remove
 	script_update_remove
-	log_rotate_script_remove
+	
+	log_rotate_script_remove "$LCWA_LOGFILE"
+	log_rotate_script_remove "$LCWA_ERRFILE"
+	log_rotate_script_remove "$LCWA_VCLOG"
+
 	pid_dir_remove
 	env_file_remove
 	crontab_entry_remove
 
 	# Remove the git repo
 	if [ $KEEPLOCALREPO -lt 1 ]; then
-		git_repo_remove
-		inst_dir_remove
+		git_repo_remove "$LCWA_LOCALREPO"
+		git_repo_remove "$LCWA_LOCALSUPREPO"
+		#~ inst_dir_remove "$LCWA_LOCALREPO"
 	fi
 
 	# Remove the local data..
@@ -1970,6 +1579,9 @@ elif [ $UNINSTALL -gt 0 ]; then
 else
 	service_is_installed
 
+	# Get our default env var values
+	env_vars_defaults_get
+
 	banner_display
 
 	if [ $? -gt 0 ]; then
@@ -1991,23 +1603,13 @@ else
 	ookla_license_install
 	pkg_deps_install
 	python_libs_install
-	
-	# Check and install or update the repo..
-	git_repo_check
 
-	REPOSTAT=$?
-	if [ $REPOSTAT -eq 10 ]; then
-		# local repo does not exist...create it..
-		git_repo_clone
-	elif [ $REPOSTAT -eq 5 ]; then
-		# wrong repo!  Exit!
-		git_repo_show
-		exit 1
-	else
-		# local repo exists...update it..
-		git_repo_clean
-		git_repo_update
-	fi
+
+	# Check and install or update the main repo..
+	git_repo_create "$LCWA_REPO" "$LCWA_REPO_BRANCH" "$LCWA_LOCALREPO"
+	
+	# Check and install the suppliment repo..
+	git_repo_create "$LCWA_SUPREPO" "$LCWA_SUPREPO_BRANCH" "$LCWA_LOCALSUPREPO"
 
 	HOME="$CUR_HOME"
 
@@ -2022,7 +1624,11 @@ else
 
 	# Create a log dir
 	log_dir_create
-	log_rotate_script_create
+	
+	# Create the log rotate scripts
+	log_rotate_script_create "$LCWA_LOGFILE"
+	log_rotate_script_create "$LCWA_ERRFILE"
+	log_rotate_script_create "$LCWA_VCLOG"
 
 	# Create the service init script
 	if [ $USE_UPSTART -gt 0 ]; then
@@ -2034,8 +1640,6 @@ else
 	else
 		service_create "$LCWA_EXEC_ARGS"
 	fi
-
-
 
 	# Create the startup debugging script
 	script_debug_create
@@ -2061,8 +1665,5 @@ else
 	finish_display
 	hostname_check
 fi
-
-
-
 
 exit 0
