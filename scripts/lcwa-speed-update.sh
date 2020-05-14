@@ -1,7 +1,9 @@
 #!/bin/bash
 # lcwa-speed-update.sh -- script to update lcwa-speed git repo and restart service..
 # Version Control for this script
-SCRIPT_VERSION=20200511.232252
+SCRIPT_VERSION=20200513.223052
+
+INST_NAME='lcwa-speed'
 
 SCRIPT="$(readlink -f "$0")"
 SCRIPT_NAME="$(basename "$0")"
@@ -9,7 +11,7 @@ DEBUG=0
 VERBOSE=0
 FORCE=0
 
-SCRIPT_UPDATE=1
+SERVICES_UPDATE=1
 SBIN_UPDATE=0
 OS_UPDATE=0
 REBOOT=0
@@ -78,7 +80,6 @@ disp_help(){
 	error_echo "Syntax: $(basename "$SCRIPT") ${EXTRA_ARGS} $(echo "$SHORTARGS" | sed -e 's/, //g' -e 's/\(.\)/[-\1] /g') $(echo "[--${LONGARGS}]" | sed -e 's/,/] [--/g' | sed -e 's/:/=entry/g')" 
 }
 
-
 env_file_read(){
 
 	if [ $IS_DEBIAN -gt 0 ]; then
@@ -124,7 +125,7 @@ function displaytime {
   printf '%d seconds\n' $S
 }
 
-script_update(){
+services_zip_update(){
 	# Get date of ourselves..
 	# Get date of file..
 	local LURL='http://www.hegardtfoundation.org/slimstuff/Services.zip'
@@ -178,7 +179,7 @@ script_update(){
 		
 }
 
-sbin_update(){
+sbin_zip_update(){
 	local LURL='http://www.hegardtfoundation.org/slimstuff/sbin.zip'
 	local TEMPFILE="$(mktemp)"
 
@@ -191,7 +192,7 @@ sbin_update(){
 		log_msg "Updating ${SCRIPT} with new verson.."
 		cd /tmp
 		#~ unzip -u -o -qq "$TEMPFILE" -d /usr/local
-		unzip -u -o "$TEMPFILE" -d /usr/local
+		unzip -o "$TEMPFILE" -d /usr/local
 		rm "$TEMPFILE"
 	fi
 	
@@ -275,8 +276,9 @@ service_status() {
 #---------------------------------------------------------------------------
 # Check to see we are where we are supposed to be..
 git_in_repo(){
-	if [ $(pwd) != "$LCWA_LOCALREPO" ]; then
-		log_msg "Error: ${LCWA_LOCALREPO} not found."
+	local LLOCAL_REPO="$1"
+	if [ $(pwd) != "$LLOCAL_REPO" ]; then
+		log_msg "Error: ${LLOCAL_REPO} not found."
 		return 128
 	fi
 }
@@ -284,7 +286,8 @@ git_in_repo(){
 #---------------------------------------------------------------------------
 # Discard any local changes from the repo..
 git_clean(){
-	cd "$LCWA_LOCALREPO" && git_in_repo
+	local LLOCAL_REPO="$1"
+	cd "$LLOCAL_REPO" && git_in_repo "$LLOCAL_REPO"
 	log_msg "Cleaning ${LCWA_LOCALREPO}"
 	if [ -d './.git' ]; then
 		git reset --hard
@@ -297,8 +300,9 @@ git_clean(){
 #---------------------------------------------------------------------------
 # Update the repo..
 git_update(){
-	cd "$LCWA_LOCALREPO" && git_in_repo
-	log_msg "Updating ${LCWA_LOCALREPO}"
+	local LLOCAL_REPO="$1"
+	cd "$LLOCAL_REPO" && git_in_repo "$LLOCAL_REPO" 
+	log_msg "Updating ${LLOCAL_REPO}"
 	if [ -d './.git' ]; then
 		git pull | tee -a "$LCWA_VCLOG"
 	elif [ -d './.svn' ]; then
@@ -307,29 +311,69 @@ git_update(){
 	return $?
 }
 
+git_update_do() {
+	local LLOCAL_REPO="$1"
+	git_clean "$LLOCAL_REPO" 
+	git_update "$LLOCAL_REPO" && status=0 || status=$?
+	if [ $status -eq 0 ]; then
+		log_msg "${LLOCAL_REPO} has been updated."
+	else
+		log_msg "Error updating ${LLOCAL_REPO}."
+	fi
+}
+
 git_check_up_to_date(){
-	cd "$LCWA_LOCALREPO" && git_in_repo
+	local LLOCAL_REPO="$1"
+	
+	cd "$LLOCAL_REPO" && git_in_repo "$LLOCAL_REPO" 
 	if [ -d './.git' ]; then
 		# http://stackoverflow.com/questions/3258243/git-check-if-pull-needed
-		log_msg "Checking ${LCWA_DESC} to see if update is needed.."
+		log_msg "Checking ${LLOCAL_REPO} to see if update is needed.."
 		if [ $($TIMEOUT_BIN $PROC_TIMEOUT git remote -v update 2>&1 | egrep -c "\[up to date\]") -gt 0 ]; then
-			log_msg "Local repository ${LCWA_LOCALREPO} is up to date."
+			log_msg "Local repository ${LLOCAL_REPO} is up to date."
 			return 0
 		else
-			log_msg "Local repository ${LCWA_LOCALREPO} requires update."
+			log_msg "Local repository ${LLOCAL_REPO} requires update."
+			git_update_do "$LLOCAL_REPO"
 			return 1
 		fi
 	fi
 }
 
-git_update_do() {
-	git_clean
-	git_update && status=0 || status=$?
-	if [ $status -eq 0 ]; then
-		log_msg "${LCWA_DESC} has been updated."
-	else
-		log_msg "Error updating ${LCWA_DESC}."
+script_update_check(){
+	local LLOCAL_REPO="$1"
+	local LINSTALL_XML="${LLOCAL_REPO}/install.xml"
+	local LREPO_VERSION=
+	local LREPO_EPOCH=
+	local LLCWA_EPOCH=
+	
+	if [ ! -f "$LINSTALL_XML" ]; then
+		log_msg "Error: ${LINSTALL_XML} file not found."
+		return 100
 	fi
+	
+	#~ <version>20200511.232252</version>
+	LREPO_VERSION="$(grep -E '<version>[0-9]{8}\.[0-9]{6}</version>' "$LINSTALL_XML" | sed -n -e 's/^.*\([0-9]\{8\}\.[0-9]\{6\}\).*$/\1/p')"
+	if [ $DEBUG -gt 0 ]; then
+		LREPO_EPOCH="$(echo "$LREPO_VERSION" | sed -e 's/\./ /g' | sed -e 's/\([0-9]\{8\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1 \2:\3:\4/')"
+		LREPO_EPOCH="$(date "-d${LREPO_EPOCH}" +%s)"
+		LLCWA_EPOCH="$(echo "$LCWA_VERSION" | sed -e 's/\./ /g' | sed -e 's/\([0-9]\{8\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1 \2:\3:\4/')"
+		LLCWA_EPOCH="$(date "-d${LLCWA_EPOCH}" +%s)"
+		
+		log_msg "Comparing dates"
+		log_msg " Running: [${LLCWA_EPOCH}] $(date_epoch_to_iso8601  ${LLCWA_EPOCH})"
+		log_msg "    Repo: [${LREPO_EPOCH}] $(date_epoch_to_iso8601  ${LREPO_EPOCH})"
+
+		[ $LLCWA_EPOCH -lt $LREPO_EPOCH ] && log_msg "Running ${SCRIPT} version is older than repo ${LLOCAL_REPO} by $(displaytime $(echo "${LREPO_EPOCH} - ${LLCWA_EPOCH}" | bc))." || log_msg "Running ${SCRIPT} version is newer than repo ${LLOCAL_REPO} by $(displaytime $(echo "${LLCWA_EPOCH} - ${LREPO_EPOCH}" | bc))." 
+	fi
+	
+	# If the repo version is greater than our version..
+	if [[ "$LREPO_VERSION" > "$LCWA_VERSION" ]]; then
+		# Update the service
+		log_msg "Updating installed ${INST_NAME} service to version ${LREPO_VERSION} from ${LLOCAL_REPO}config-${INST_NAME}.sh"
+		"${LLOCAL_REPO}/config-${INST_NAME}.sh" --update
+	fi
+	
 }
 
 sleep_random(){
@@ -374,10 +418,10 @@ while [ $# -gt 0 ]; do
 			FORCE=1
 			;;
 		--script-update)
-			SCRIPT_UPDATE=1
+			SERVICES_UPDATE=1
 			;;
 		--no-script-update)
-			SCRIPT_UPDATE=0
+			SERVICES_UPDATE=0
 			;;
 		--sbin-update)
 			SBIN_UPDATE=1
@@ -392,50 +436,38 @@ while [ $# -gt 0 ]; do
 	shift
 done
 
-INST_NAME=lcwa-speed
-
 # Get our environmental variables..
 env_file_read
 
+service_stop
+
+# Check and update Andi's repo..
+git_check_up_to_date "$LCWA_LOCALREPO"
+
+# Check & update the suplimental repo (contains this script)
+git_check_up_to_date "$LCWA_LOCALSUPREPO"
+
 # Service version is: $LCWA_VERSION
-
-# Download the install.xml file from https://raw.githubusercontent.com/gharris999/config-lcwa-speed/master/install.xml
-
-# Alternatly, just git-update the $LCWA_LOCALSUPREPO
-
-# Read the version info from the instll.xml file:
-
-#~ REPO_VERSION="$(grep -E '<version>.*</version>' "$TEMPFILE" | sed -n -e 's#<version>\(.*\)</version>#\1#p')"
-
-# Compare $REPO_VERSION with $LCWA_VERSION
-
-# If $REPO_VERSION is newer, 
-
-
+# See if we need to update the service installation
+script_update_check "$LCWA_LOCALSUPREPO"
 
 
 # See if we need to update this update script..
-if [ $SCRIPT_UPDATE -gt 0 ]; then
-	script_update
+if [ $SERVICES_UPDATE -gt 0 ]; then
+	services_zip_update
 fi
 
 if [ $SBIN_UPDATE -gt 0 ]; then
-	sbin_update
+	sbin_zip_update
 fi
 
 if [ $OS_UPDATE -gt 0 ]; then
 	log_msg "Updating operating system.."
-	service_stop
-	apt-upgrade
+	apt-get update
+	apt-get -y upgrade
 fi
 
-# Check Andi's repo to see if there are updates..
-git_check_up_to_date
 
-if [[ $? -gt 0 ]] || [[ $FORCE -gt 0 ]]; then
-	service_stop
-	git_update_do
-fi
 
 if [ $REBOOT -gt 0 ]; then
 	log_msg "${SCRIPT} requries a reboot of this system!"

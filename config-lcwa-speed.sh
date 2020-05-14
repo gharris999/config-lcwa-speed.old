@@ -4,7 +4,7 @@
 # Bash script for installing Andi Klein's Python LCWA PPPoE Speedtest Logger 
 # as a service on systemd, upstart & sysv systems
 ######################################################################################################
-SCRIPT_VERSION=20200511.232252
+SCRIPT_VERSION=20200513.223052
 REQINCSCRIPTVER=20200422
 
 INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
@@ -17,6 +17,7 @@ if [[ -z "$INCSCRIPTVER" ]] || [[ $INCSCRIPTVER -lt $REQINCSCRIPTVER ]]; then
 fi
 
 SCRIPT="$(readlink -f "$0")"
+SCRIPT_DIR="$(dirname "$SCRIPT")"
 SCRIPTNAME=$(basename $0)
 
 # Make sure we're running under root or sudo credentials
@@ -51,6 +52,9 @@ CUR_HOME="$HOME"
 ######################################################################################################
 # Vars specific to this service install
 ######################################################################################################
+
+# Change to 1 to prevent updates to the env file
+INST_ENVFILE_LOCK=0
 
 # Download all revisions, not just most recent..
 # All-revs are necessary in order to switch between branches..
@@ -148,8 +152,8 @@ HOSTNAME=$(hostname | tr [a-z] [A-Z])
 #~ LCWA_CLEARLOG=1
 
 # Utility Scripts
-#~ LCWA_DEBUG="/usr/local/sbin/${INST_NAME}-debug.sh"
-#~ LCWA_UPDATE="/usr/local/sbin/${INST_NAME}-update.sh"
+#~ LCWA_DEBUG_SCRIPT="${LCWA_LOCALSUPREPO}/scripts/${INST_NAME}-debug.sh"
+#~ LCWA_UPDATE_SCRIPT="${LCWA_LOCALSUPREPO}/scripts/${INST_NAME}-update.sh"
 
 # Other essential environmental variables
 #~ PYTHONPATH=/usr/local/lib/python2.7/site-packages
@@ -195,8 +199,8 @@ LCWA_RTPRIO=
 LCWA_MEMLOCK=
 LCWA_CLEARLOG=
 
-LCWA_DEBUG=
-LCWA_UPDATE=
+LCWA_DEBUG_SCRIPT=
+LCWA_UPDATE_SCRIPT=
 
 #~ PYTHONPATH=
 #~ HOME=
@@ -235,8 +239,8 @@ env_vars_name(){
 "LCWA_RTPRIO" \
 "LCWA_MEMLOCK" \
 "LCWA_CLEARLOG" \
-"LCWA_DEBUG" \
-"LCWA_UPDATE" \
+"LCWA_DEBUG_SCRIPT" \
+"LCWA_UPDATE_SCRIPT" \
 "PYTHONPATH" \
 "HOME"
 }
@@ -252,7 +256,7 @@ env_vars_defaults_get(){
 	[ -z "$LCWA_PRODUCT" ] 			&& LCWA_PRODUCT="$(echo "$INST_NAME" |  tr [a-z] [A-Z])"
 	[ -z "$LCWA_DESC" ] 			&& LCWA_DESC="${LCWA_PRODUCT}-TEST Logger"
 	[ -z "$LCWA_PRODUCTID" ] 		&& LCWA_PRODUCTID="f1a4af09-977c-458a-b3f7-f530fb9029c1"
-	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200511.232252
+	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200513.223052
 	
 	[ -z "$LCWA_USER" ] 			&& LCWA_USER="$INST_USER"
 	[ -z "$LCWA_GROUP" ] 			&& LCWA_GROUP="$INST_GROUP"
@@ -287,8 +291,8 @@ env_vars_defaults_get(){
 	[ -z "$LCWA_MEMLOCK" ]			&& LCWA_MEMLOCK="$INST_MEMLOCK"
 	[ -z "$LCWA_CLEARLOG" ] 		&& LCWA_CLEARLOG=1
 
-	[ -z "$LCWA_DEBUG" ]			&& LCWA_DEBUG="/usr/local/sbin/${INST_NAME}-debug.sh"
-	[ -z "$LCWA_UPDATE" ]			&& LCWA_UPDATE="/usr/local/sbin/${INST_NAME}-update.sh"
+	[ -z "$LCWA_DEBUG_SCRIPT" ]		&& LCWA_DEBUG_SCRIPT="${LCWA_LOCALSUPREPO}/scripts/${INST_NAME}-debug.sh"
+	[ -z "$LCWA_UPDATE_SCRIPT" ]	&& LCWA_UPDATE_SCRIPT="${LCWA_LOCALSUPREPO}/scripts/${INST_NAME}-update.sh"
 	
 	[ -z "$PYTHONPATH" ] 			&& PYTHONPATH="$(find /usr -type d -name 'site-packages' -exec readlink -f {} \; | head -n 1)"
 	
@@ -319,8 +323,11 @@ db_keyfile_install(){
 	if [ -f "$LCWA_DB_KEYFILE" ]; then
 		rm -f "$LCWA_DB_KEYFILE"
 	fi
-	
-	error_echo "Creating dropbox key file ${LCWA_DB_KEYFILE} from encrypted source.  Please enter the password when prompted."
+
+	error_echo "========================================================================================="
+	error_echo "Creating dropbox key file ${LCWA_DB_KEYFILE} from encrypted source."
+	error_echo "                Please enter the password when prompted."
+	error_echo " "
 	echo "U2FsdGVkX18fLV7OVTsMgF+SrMMI05OFtrQcRur6KZ7Ft2+eaC7rRkBJ/stnDggVFro27mMsM2CM4Y4WXEwVuAV9LcajUN+UI0e7e0q3ymYqajoHnX/TBjdUqiEYMNbO" | openssl enc -aes-256-cbc -pbkdf2 -d -a -out "$LCWA_DB_KEYFILE"
 	
 }
@@ -338,6 +345,7 @@ db_keyfile_remove(){
 ############################################################################
 apt_install(){
 	apt-get -y install "$@"
+	return $?
 }
 
 apt_uninstall(){
@@ -368,21 +376,38 @@ apt_uninstall(){
 # pkg_deps_install() -- Installs all dependencies available via apt
 ############################################################################
 pkg_deps_install(){
+	local LRET=1
 	
-	error_echo "Installing Package Dependencies.." 
-	[ $TEST_MODE -lt 1 ] && apt_install gnupg1 \
-										espeak \
-										dnsutils \
-										pulseaudio \
-										build-essential \
-										git \
-										scons \
-										swig \
-										libffi-dev \
-										libffi6 \
-										at-spi2-core
-	
-	return 0
+	# Make 3 attempts to install packages.  RPi's package repositories have a tendency to time-out..
+	for n in 1 2 3
+	do
+
+		error_echo "Installing Package Dependencies.." 
+		
+		[ $TEST_MODE -lt 1 ] && apt_install gnupg1 \
+											espeak \
+											dnsutils \
+											whois \
+											ufw \
+											pulseaudio \
+											build-essential \
+											git \
+											scons \
+											swig \
+											libffi-dev \
+											libffi6 \
+											at-spi2-core
+		LRET=$?
+
+		if [ $LRET -eq 0 ]; then
+			break
+		fi
+		# Problem installing the dependencies..
+		error_echo "Error installing package dependencies...waiting 10 seconds to try again.."
+		sleep 10
+	done
+
+	return $LRET
 }
 
 pkg_deps_remove(){
@@ -398,7 +423,7 @@ pkg_deps_remove(){
 										  at-spi2-core
 	
 	
-	return 0
+	return $?
 }
 
 ############################################################################
@@ -411,6 +436,10 @@ ookla_license_install(){
 	local LICENSE_SRC='/root/.config/ookla/speedtest-cli.json'
 	local LICENSE_DIR="/var/lib/${INST_NAME}/.config/ookla"
 	local LICENSE_FILE="${LICENSE_DIR}/speedtest-cli.json"
+	
+	if [[ -f "$LICENSE_FILE" ]] && [[ $FORCE -lt 1 ]]; then
+		error_echo "Ookla speed test licence file ${LICENSE_FILE} already installed.  Use --force to reinstall."
+	fi
 	
 	error_echo "Running ${OOKLA} to generate a license file.."
 
@@ -446,6 +475,12 @@ ookla_speedtest_install(){
 	
 	local DEB_DISTRO="$(lsb_release -sc)"
 	local APTLIST_FILE='/etc/apt/sources.list.d/speedtest.list'
+	local LRET=1
+	
+	if [[ -f "$APTLIST_FILE" ]] && [[ ! -z "$(which speedtest)" ]] && [[ $FORCE -lt 1 ]]; then
+		error_echo "Ookla speedtest already installed.  Use --force to reinstall."
+		return 0
+	fi
 	
 	export INSTALL_KEY=379CE192D401AB61
 	export DEB_DISTRO=$(lsb_release -sc)
@@ -478,7 +513,26 @@ ookla_speedtest_install(){
 		fi
 	fi
 	
-	apt_install speedtest
+	if [ $TEST_MODE -lt 1 ]; then
+		# Make 3 attempts to install packages.  RPi's package repositories have a tendency to time-out..
+		for n in 1 2 3
+		do
+
+			error_echo "Installing Ookla speedtest package.." 
+			apt_install speedtest
+			LRET=$?
+
+			if [ $LRET -eq 0 ]; then
+				break
+			fi
+			# Problem installing the dependencies..
+			error_echo "Error installing package dependencies...waiting 10 seconds to try again.."
+			sleep 10
+
+		done
+	fi
+	
+	return $LRET
 	
 }
 
@@ -492,13 +546,13 @@ ookla_speedtest_remove(){
 	
 	if [ ! -z "$SPEEDTEST_BIN" ]; then
 		error_echo "Uninstalling ${SPEEDTEST_BIN}"
-		apt remove -y speedtest
-		apt autoremove
+		[ $TEST_MODE -lt 1 ] && apt remove -y speedtest
+		[ $TEST_MODE -lt 1 ] && apt autoremove
 	fi
 	
 	if [ -f "$APTLIST_FILE" ]; then
 		error_echo "Removing ${APTLIST_FILE} from apt sources.."
-		rm -f "$APTLIST_FILE"
+		[ $TEST_MODE -lt 1 ] && rm -f "$APTLIST_FILE"
 	fi
 }
 
@@ -854,29 +908,41 @@ git_repo_remove(){
 ######################################################################################################
 # lcwa_debug_script_create() Create the startup debugging script..
 ######################################################################################################
-script_debug_create(){
+script_debug_install(){
+	
+	local LLOCAL_DEBUG_SCRIPT="/usr/local/sbin/${INST_NAME}-debug.sh"
+	
+	# Copy
+	if [ -f "$LCWA_DEBUG_SCRIPT" ]; then
+		cp -pf "${LCWA_LOCALSUPREPO}/instsrv_functions.sh" /usr/local/sbin
+		cp -pf "$LCWA_DEBUG_SCRIPT" "$LLOCAL_DEBUG_SCRIPT"
+		chmod 755 "$LLOCAL_DEBUG_SCRIPT"
+		touch "--reference=${LCWA_DEBUG_SCRIPT}" "$LLOCAL_DEBUG_SCRIPT"
+	elif [ -f "${SCRIPT_DIR}/scripts/${INST_NAME}-debug.sh" ]; then
+		cp -pf "${SCRIPT_DIR}/instsrv_functions.sh" /usr/local/sbin
+		cp -pf "${SCRIPT_DIR}/scripts/${INST_NAME}-debug.sh" "$LLOCAL_DEBUG_SCRIPT"
+		chmod 755 "$LLOCAL_DEBUG_SCRIPT"
+		touch "--reference=${SCRIPT_DIR}/scripts/${INST_NAME}-debug.sh" "$LLOCAL_DEBUG_SCRIPT"
+	fi
 
-	[ -z "$LCWA_DEBUG" ]			&& LCWA_DEBUG="/usr/local/sbin/${INST_NAME}-debug.sh"
+	if [ ! -f "$LLOCAL_DEBUG_SCRIPT" ]; then
+		error_echo "Error: could not install ${LLOCAL_DEBUG_SCRIPT}"
+		return 1
+	fi
+	
+	error_echo "${LLOCAL_DEBUG_SCRIPT} installed.."
 
-    error_echo "Creating ${LCWA_DEBUG}.."
-
-cat >"$LCWA_DEBUG" <<DEBUG_SCR1;
-
-DEBUG_SCR1
-chmod 755 "$LCWA_DEBUG"
-
+	return 0
 }
 
 ######################################################################################################
 # lcwa_debug_script_remove() Remove the startup debugging script..
 ######################################################################################################
 script_debug_remove(){
-
-	[ -z "$LCWA_DEBUG" ]			&& LCWA_DEBUG="/usr/local/sbin/${INST_NAME}-debug.sh"
-
-	if [ -f "$LCWA_DEBUG" ]; then
-		error_echo "Removing ${LCWA_DEBUG}.."
-		rm "$LCWA_DEBUG"
+	local LLOCAL_DEBUG_SCRIPT="/usr/local/sbin/${INST_NAME}-debug.sh"
+	if [ -f "$LLOCAL_DEBUG_SCRIPT" ]; then
+		error_echo "Removing ${LLOCAL_DEBUG_SCRIPT}.."
+		rm "$LLOCAL_DEBUG_SCRIPT"
 	fi
 
 }
@@ -884,16 +950,28 @@ script_debug_remove(){
 ######################################################################################################
 # lcwa_update_script_create() Create the git/svn update script..
 ######################################################################################################
-script_update_create(){
+script_update_install(){
+	local LLOCAL_UPDATE_SCRIPT="/usr/local/sbin/${INST_NAME}-update.sh"
+	
+	# Copy
+	if [ -f "$LCWA_UPDATE_SCRIPT" ]; then
+		cp -pf "${LCWA_LOCALSUPREPO}/instsrv_functions.sh" /usr/local/sbin
+		cp -pf "$LCWA_UPDATE_SCRIPT" "$LLOCAL_UPDATE_SCRIPT"
+		chmod 755 "$LLOCAL_UPDATE_SCRIPT"
+		touch "--reference=${LCWA_UPDATE_SCRIPT}" "$LLOCAL_UPDATE_SCRIPT"
+	elif [ -f "${SCRIPT_DIR}/scripts/${INST_NAME}-update.sh" ]; then
+		cp -pf "${SCRIPT_DIR}/instsrv_functions.sh" /usr/local/sbin
+		cp -pf "${SCRIPT_DIR}/scripts/${INST_NAME}-update.sh" "$LLOCAL_UPDATE_SCRIPT"
+		chmod 755 "$LLOCAL_UPDATE_SCRIPT"
+		touch "--reference=${SCRIPT_DIR}/scripts/${INST_NAME}-update.sh" "$LLOCAL_UPDATE_SCRIPT"
+	fi
 
-	[ -z "$LCWA_UPDATE" ]		&& LCWA_UPDATE="/usr/local/sbin/${INST_NAME}-update.sh"
-
-    error_echo "Creating ${LCWA_UPDATE}.."
-
-cat >"$LCWA_UPDATE" <<UPDATE_SCR1;
-
-UPDATE_SCR1
-chmod 755 "$LCWA_UPDATE"
+	if [ ! -f "$LLOCAL_UPDATE_SCRIPT" ]; then
+		error_echo "Error: could not install ${LLOCAL_UPDATE_SCRIPT}"
+		return 1
+	fi
+	
+	error_echo "${LLOCAL_UPDATE_SCRIPT} installed.."
 
 }
 
@@ -901,25 +979,25 @@ chmod 755 "$LCWA_UPDATE"
 # lcwa_update_script_remove() Remove the git/svn update script..
 ######################################################################################################
 script_update_remove(){
-
-	[ -z "$LCWA_UPDATE" ]		&& LCWA_UPDATE="/usr/local/sbin/${INST_NAME}-update.sh"
-
-	if [ -f "$LCWA_UPDATE" ]; then
-		error_echo "Removing ${LCWA_UPDATE}.."
-		rm "$LCWA_UPDATE"
+	local LLOCAL_UPDATE_SCRIPT="/usr/local/sbin/${INST_NAME}-update.sh"
+	if [ -f "$LLOCAL_UPDATE_SCRIPT" ]; then
+		error_echo "Removing ${LLOCAL_UPDATE_SCRIPT}.."
+		rm "$LLOCAL_UPDATE_SCRIPT"
 	fi
 
 }
 
 crontab_entry_add(){
-	local COMMENT='#Everyday, at 5 minutes past midnight:'
-	local EVENT='5 0 * * * /usr/local/sbin/lcwa-speed-update.sh --debug'
-	#~ local EVENT='5 0 * * * /usr/local/sbin/lcwa-speed-update.sh --debug --force --sbin-update'
+	local COMMENT='#Everyday, at 5 minutes past midnight, update ${INST_NAME} and restart the service:'
+	local EVENT="5 0 * * * ${LCWA_UPDATE_SCRIPT} --debug"
+	#~ local EVENT='5 0 * * * /usr/local/share/config-lcwa-speed/scripts/lcwa-speed-update.sh --debug --force --sbin-update'
 	local ROOTCRONTAB='/var/spool/cron/crontabs/root'
 	
+	[ ! -f "$ROOTCRONTAB" ] && touch "$ROOTCRONTAB"
+	
 	# Remove any old reference to lcwa-speed-update.sh
-	sed -i "/^.*${COMMENT}.*$/d" "$ROOTCRONTAB"
-	sed -i "/^.*lcwa-speed-update.*$/d" "$ROOTCRONTAB"
+	sed -i "/^#.*${INST_NAME}.*$/d" "$ROOTCRONTAB"
+	sed -i "/^.*${INST_NAME}-update.*$/d" "$ROOTCRONTAB"
 
 	error_echo "Adding ${EVENT} to ${ROOTCRONTAB}"
 	echo "$COMMENT" >>"$ROOTCRONTAB"
@@ -942,17 +1020,21 @@ crontab_entry_add(){
 }
 
 crontab_entry_remove(){
-	local COMMENT='#Everyday, at 5 minutes past midnight:'
-	local EVENT='5 0 * * * /usr/local/sbin/lcwa-speed-update.sh'
+	local COMMENT='#Everyday, at 5 minutes past midnight, update ${INST_NAME} and restart the service:'
+	local EVENT="5 0 * * * ${LCWA_UPDATE_SCRIPT} --debug"
 	local ROOTCRONTAB='/var/spool/cron/crontabs/root'
 	
-	# Remove any old reference to lcwa-speed-update.sh
-	sed -i "/^.*lcwa-speed-update.*$/d" "$ROOTCRONTAB"
-
 	error_echo "Removing ${EVENT} from ${ROOTCRONTAB}"
 	# Remove any old reference to lcwa-speed-update.sh
-	sed -i "/^.*${COMMENT}.*$/d" "$ROOTCRONTAB"
-	sed -i "/^.*lcwa-speed-update.*$/d" "$ROOTCRONTAB"
+	sed -i "/^#.*${INST_NAME}.*$/d" "$ROOTCRONTAB"
+	sed -i "/^.*${INST_NAME}-update.*$/d" "$ROOTCRONTAB"
+	
+	# signal crond to reload the file
+	sudo touch /var/spool/cron/crontabs	
+
+	# Make the entry stick
+	error_echo "Restarting root crontab.."
+	systemctl restart cron
 
 	error_echo 'New crontab:'
 	error_echo '======================================================================'
@@ -960,25 +1042,68 @@ crontab_entry_remove(){
 	error_echo '======================================================================'
 }
 
-hostname_check(){
-	local LHOSTNAME=
-	local LOLDNAME="$(hostname)"
-
-	# If hostname begins with 'lc', make LC
-	if [ "$(hostname | grep -c -E '^lc.*$')" -gt 0 ]; then
-		LHOSTNAME="$(hostname | sed -e 's/^lc/LC/')"
-		config-hostname.sh "$LHOSTNAME"
-		error_echo "Hostname changed from ${LOLDNAME} to ${LHOSTNAME}.."
+# Fixup hostname, /etc/hostname & /etc/hosts with new hostname
+hostname_fix(){
+	local LOLDHOSTNAME="$1"
+	local LNEWHOSTNAME="$2"
+	
+	local LCONFFILE='/etc/hostname'
+	local LHOSTSFILE='/etc/hosts'
+	
+	if [ ! -z "$(which hostnamectl)" ]; then
+		error_echo "Changing hostname from ${LOLDHOSTNAME} to ${LNEWHOSTNAME}.."
+		hostnamectl set-hostname "$LNEWHOSTNAME"
 	fi
 
-	if [ "$(hostname | grep -c -E '^LC.*$')" -lt 1 ]; then
-		error_echo "WARNING: The hostname of this system does not begin with 'LC'."
-		error_echo ' '
-		error_echo "Recomendation: Run config-hostname.sh 'LCXXspeedbox' to change the hostname."
+	if [ -f "$LCONFFILE" ]; then
+		error_echo "Fixing up ${LCONFFILE} with changed hostname ${LNEWHOSTNAME}.."
+		[ ! -f "${LCONFFILE}.org" ] && cp "$LCONFFILE" "${LCONFFILE}.org"
+		cp "$LCONFFILE" "${LCONFFILE}.bak"
+		sed -i "s/$LOLDHOSTNAME/$LNEWHOSTNAME/g" "$LCONFFILE"
+		grep -i "$LNEWHOSTNAME" "$LCONFFILE"
 	fi
+	
+	if [ -f "$LHOSTSFILE" ]; then
+		error_echo "Fixing up ${LHOSTSFILE} with changed hostname ${LNEWHOSTNAME}.."
+		[ ! -f "${LHOSTSFILE}.org" ] && cp "$LHOSTSFILE" "${LHOSTSFILE}.org"
+		cp "$LHOSTSFILE" "${LHOSTSFILE}.bak"
+		sed -i "s/$LOLDHOSTNAME/$LNEWHOSTNAME/g" "$LHOSTSFILE"
+		grep -i "$LNEWHOSTNAME" "$LHOSTSFILE"
+	fi
+	
 }
 
+# Check the hostname, prompt for a new name if not LCxx-----
+hostname_check(){
+	local LOLDNAME="$(hostname)"
+	local LNEWNAME=
 
+	# If hostname begins with 'lcnn', make LCnn
+	if [ "$(hostname | grep -c -E '^lc[0-9]{2}.*$')" -gt 0 ]; then
+		LNEWNAME="$(hostname | sed -e 's/^lc/LC/')"
+		hostname_fix "$LOLDNAME" "$LNEWNAME"
+		return 0
+	fi
+
+	# If the current hostname doesn't conform to our specs, prompt for a new hostname
+	if [ "$(hostname | grep -c -E '^LC[0-9]{2}.*$')" -lt 1 ]; then
+		error_echo "====================================================================="
+		error_echo "WARNING: The hostname of this system does not begin with 'LCnn'."
+	fi
+	
+	while [ "$(hostname | grep -c -E '^LC[0-9]{2}.*$')" -lt 1 ]
+	do	
+		error_echo ' '
+		error_echo " Please enter a new hostname:"
+		read LNEWNAME
+		if [ "$(echo "$LNEWNAME" | grep -c -E '^LC[0-9]{2}.*$')" -gt 0 ]; then
+			hostname_fix "$LOLDNAME" "$LNEWNAME"
+		else
+			error_echo "Error: ${LNEWNAME} is not a valid LCnn----- hostname."
+		fi
+	done
+	[ "$(hostname | grep -c -E '^LC[0-9]{2}.*$')" -lt 1 ] && error_echo "WARNING: The hostname of this system needs to be changed using hostnamectl set-hostname."
+}
 
 #------------------------------------------------------------------------------
 # banner_display() -- Script banner and warnings..
@@ -1128,6 +1253,9 @@ CONF1
 
 	chmod 755 "$RCLOCAL"
 	
+	cp -pf "$SCRIPT_DIR}/scripts/chkfw.sh" /usr/local/sbin
+	chmod 755 /usr/local/sbin/chkfw.sh
+	
 }
 
 admin_user_create(){
@@ -1154,6 +1282,158 @@ admin_user_create(){
 		fi
 	fi
 	
+}
+
+systemd_set_tz(){
+	# Check the timezone we're set to..
+	TIMEDATECTL="$(which timedatectl)"
+
+	if [ ! -z "$TIMEDATECTL" ]; then
+		SYSTZ="$(timedatectl status | grep 'zone:' | sed -n -e 's/^.*: \(.*\) (.*$/\1/p')"
+		MYTZ="$(timezone_get)"
+		if [ "$MYTZ" != "$SYSTZ" ]; then
+			error_echo "Resetting local time zone from UTC to ${MYTZ}.."
+			timedatectl set-timezone "$MYTZ"
+			timedatectl status
+		else
+			error_echo "Confirming local timezone as: ${SYSTZ}.."
+		fi
+	fi
+}
+
+
+
+########################################################################################
+# config_failsafe_firewall() -- make sure every interface at least has port 22 open for ssh
+########################################################################################
+config_failsafe_firewall(){
+	local LIFACE=
+	local LIPADDR=
+	local LPORT=
+	
+	local UDP_FAILSAFE_PORTS=(67 68)
+	local TCP_FAILSAFE_PORTS=(22)
+	
+	for LIFACE in $(ifaces_get)
+	do
+		LIPADDR="$(iface_ipaddress_get "$LIFACE")"
+		
+		error_echo "Configuring failsafe firewall for ${LIFACE} ${LIPADDR}"
+		
+		for LPORT in "${UDP_FAILSAFE_PORTS[@]}"
+		do
+			#~ iface_firewall_open_port "$LIPADDR" "udp" "$LPORT"
+			ipaddr_firewall_open_port "$LIPADDR" "udp" "$LPORT"
+		done
+
+		for LPORT in "${TCP_FAILSAFE_PORTS[@]}"
+		do
+			#~ iface_firewall_open_port "$IFACE" "tcp" "$LPORT"
+			ipaddr_firewall_open_port "$LIPADDR" "tcp" "$LPORT"
+		done
+	
+	done
+	return 0
+}
+
+firewall_disable(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME} $@"
+	error_echo "Disabling firewall.."
+	if [ $USE_FIREWALLD -gt 0 ]; then
+		systemctl stop firewalld
+	elif [ $USE_UFW -gt 0 ]; then
+		ufw disable
+	fi
+}
+
+firewall_enable(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME} $@"
+	error_echo "Enabling firewall.."
+	if [ $USE_FIREWALLD -gt 0 ]; then
+		systemctl start firewalld
+		return 0
+	elif [ $USE_UFW -gt 0 ]; then
+		echo y | ufw enable
+		ufw status verbose
+	fi
+}
+
+# firewall_set_default() Resets the system firewall to all incoming ports closed
+########################################################################################
+firewall_set_default(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME} $@"
+	error_echo "Setting firewall to defaults.."
+	#~ apt_install ufw
+	firewall_disable
+	
+	# Don't wipe out any previous ufw settings..
+	#~ if [ $USE_FIREWALLD -gt 0 ]; then
+		#~ # Don't know how to do this with firewalld.
+		#~ # Just remove all files from /etc/firewalld/zones & reload & restart firewalld?
+		#~ # See: https://bugzilla.redhat.com/show_bug.cgi?id=1531545
+		#~ firewall-cmd --reload
+	#~ elif [ $USE_UFW -gt 0 ]; then
+		#~ ufw --force reset
+		#~ ufw default deny incoming
+		#~ ufw default allow outgoing
+	#~ fi
+	
+	config_failsafe_firewall
+	
+	firewall_enable
+
+}
+
+# change the default pi user's password to Andi's preferred password
+pi_user_chpasswd(){
+	local LUSER='pi'
+	
+	# LPASS=$(echo 'password' | mkpasswd --method=SHA-256 --stdin)
+	local LPASS='$5$rGd8cYfswkEV$1nWCsvXeJELc0jku641BBmCQOKwZ8U0v59PIC1oEAE2'
+	
+	is_user "$LUSER"
+
+	# If pi user exists..
+	if [ $? -lt 1 ]; then
+		echo "${LUSER}:${LPASS}" | chpasswd --encrypted
+	fi
+	
+}
+
+# Fixups for Raspberry Pi Raspbian GNU/Linux 10 (buster) systems
+rpi_fixups(){
+	local IS_RPI=0
+	
+	if [ -z "$(which lsb_release)" ]; then
+		return 1
+	fi
+
+	#Raspbian GNU/Linux 10 (buster)
+	IS_RPI=$(lsb_release -sd | grep -c 'Raspbian')
+	
+	if [ $IS_RPI -lt 1 ]; then
+		return 1
+	fi
+	
+	# This system is a Raspberry Pi running Raspbian.  Fix some things..
+	error_echo "Making Raspberry Pi-specific system settings.."
+	
+	# Reset the system timezone from GMT to local
+	systemd_set_tz
+	
+	# Configure ufw to allow DHCP/BOOTP & SSH
+	firewall_set_default
+	
+	# Change the default pi user password
+	pi_user_chpasswd
+	
+	# Make sure the cron daemon is enabled
+	systemctl enable cron
+	
+	# Make sure the ssh daemon is enabled and started..
+	systemctl enable ssh
+	systemctl restart ssh
+
 }
 
 
@@ -1208,6 +1488,7 @@ no-test,
 verbose,
 quiet,
 force,
+env-lock,
 python2,
 python3,
 no-pause,
@@ -1224,7 +1505,6 @@ noclean,keep,keep-repo,
 disable,
 enable,
 update,
-no-scan,
 high,rtprio
 normal,no-rtprio
 name:,service:,service-name:,
@@ -1282,6 +1562,9 @@ while [ $# -gt 0 ]; do
 			;;
 		--no-pause)
 			NO_PAUSE=1
+			;;
+		--env-lock)
+			INST_ENVFILE_LOCK=1
 			;;
 		--all|--allrevs|--all-revs)
 			ALLREVS=1
@@ -1416,37 +1699,17 @@ elif [ $ENABLE -gt 0 ]; then
 # Checkout
 elif [ $CHECKOUT_ONLY -gt 0 ]; then
 
-	service_is_installed
-
-	if [ $? -lt 1 ]; then
-		error_exit "${INST_NAME} is not installed.  Cannot remove ${INST_NAME}.."
-	fi
-
 	service_stop
 
-	# Remove the local repo..
-	git_repo_remove
-
-	git_repo_check
-
-	REPOSTAT=$?
-	if [ $REPOSTAT -eq 10 ]; then
-		# local repo does not exist...create it..
-		git_repo_clone
-	elif [ $REPOSTAT -eq 5 ]; then
-		# wrong repo!  Exit!
-		git_repo_show
-		exit 1
-	else
-		# local repo exists...update it..
-		git_repo_clean
-		git_repo_update
-	fi
-
-
-	#Update the repo
-	git_repo_update
-
+	# Remove the local repos..
+	git_repo_remove "$LCWA_LOCALREPO"
+	git_repo_remove "$LCWA_LOCALSUPREPO"
+	
+	# Check and install or update the main repo..
+	git_repo_create "$LCWA_REPO" "$LCWA_REPO_BRANCH" "$LCWA_LOCALREPO"
+	
+	# Check and install the suppliment repo..
+	git_repo_create "$LCWA_SUPREPO" "$LCWA_SUPREPO_BRANCH" "$LCWA_LOCALSUPREPO"
 
 	service_start
 	service_status
@@ -1470,18 +1733,22 @@ elif [ $UPDATE -gt 0 ]; then
 	service_disable
 
 	env_file_create $(env_vars_name)
-	
-	HOME="$CUR_HOME"
 
 	env_file_read
 	data_dir_update
 	log_dir_update
 	
-	# Check and update the main repo..
-	git_repo_check && git_repo_update
+	# Create the log rotate scripts
+	log_rotate_script_create "$LCWA_LOGFILE"
+	log_rotate_script_create "$LCWA_ERRFILE"
+	log_rotate_script_create "$LCWA_VCLOG"
 	
-	# Check and update the suppliment repo..
-
+	# Check and install or update the main repo..
+	git_repo_create "$LCWA_REPO" "$LCWA_REPO_BRANCH" "$LCWA_LOCALREPO"
+	
+	# Check and install the suppliment repo..
+	git_repo_create "$LCWA_SUPREPO" "$LCWA_SUPREPO_BRANCH" "$LCWA_LOCALSUPREPO"
+	
 	# Create the service init script
 	service_priority_set
 	
@@ -1490,13 +1757,16 @@ elif [ $UPDATE -gt 0 ]; then
 	elif [ $USE_SYSTEMD -gt 0 ]; then
 		systemd_unit_file_create "$LCWA_EXEC_ARGS"
 		systemd_unit_file_pidfile_remove		
-		systemd_unit_file_logto_set "$LCWA_LOGFILE" "/var/log/${INST_NAME}/${INST_NAME}-error.log"
+		systemd_unit_file_logto_set "$LCWA_LOGFILE" "$LCWA_ERRFILE"
 	else
 		service_create "$LCWA_EXEC_ARGS"
 	fi
 	
-	script_debug_create
-	script_update_create
+	# Install the startup debugging & update scripts
+	script_debug_install
+	script_update_install
+	
+	HOME="$CUR_HOME"
 
 	# Configure root crontab to update the git repo and restart the service at 12:05 am..
 	crontab_entry_add
@@ -1588,6 +1858,9 @@ else
 		service_stop
 	fi
 	
+	# Check the hostname and change it if necessary..
+	hostname_check
+	
 	# Create the service account
 	inst_user_create
 
@@ -1604,6 +1877,8 @@ else
 	pkg_deps_install
 	python_libs_install
 
+	# Fixup RPi specifics..
+	rpi_fixups
 
 	# Check and install or update the main repo..
 	git_repo_create "$LCWA_REPO" "$LCWA_REPO_BRANCH" "$LCWA_LOCALREPO"
@@ -1641,11 +1916,9 @@ else
 		service_create "$LCWA_EXEC_ARGS"
 	fi
 
-	# Create the startup debugging script
-	script_debug_create
-
-	# Create the git/svn updating script
-	script_update_create
+	# Install the startup debugging & update scripts
+	script_debug_install
+	script_update_install
 
 	# Create the service control links..
 	service_enable
@@ -1663,6 +1936,8 @@ else
 	service_status
 
 	finish_display
+	
+	#Final warning if the hostname isn't LCXX
 	hostname_check
 fi
 

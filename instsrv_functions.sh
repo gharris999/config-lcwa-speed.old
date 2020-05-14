@@ -4,7 +4,7 @@
 # Bash include script for generically installing services on upstart, systemd & sysv systems
 # 20190312 -- Gordon Harris
 ######################################################################################################
-INCSCRIPTVER=20200504
+INCSCRIPTVER=20200513
 SCRIPTNAME=$(basename "$0")
 
 # Get the underlying user...i.e. who called sudo..
@@ -124,7 +124,8 @@ INST_MEMLOCK=
 
 INST_USER=
 INST_GROUP=
-INIT_ENVFILE=
+INST_ENVFILE=
+INST_ENVFILE_LOCK=0
 
 INST_DATADIR=
 INST_DATAFILE=
@@ -274,11 +275,11 @@ service_inst_prep(){
 	[ -z "$INST_CONF" ] && INST_CONF="/etc/${INST_NAME}/${INST_NAME}.conf"
 	[ -z "$INST_USER" ] && inst_user_create
 	# [ -z "$INST_GROUP" ] &&
-	if [ -z "$INIT_ENVFILE" ]; then
+	if [ -z "$INST_ENVFILE" ]; then
 		if [ $IS_DEBIAN -gt 0 ]; then
-			INIT_ENVFILE="/etc/default/${INST_NAME}"
+			INST_ENVFILE="/etc/default/${INST_NAME}"
 		else
-			INIT_ENVFILE="/etc/sysconfig/${INST_NAME}"
+			INST_ENVFILE="/etc/sysconfig/${INST_NAME}"
 		fi
 	fi
 	[ -z "$INST_DATADIR" ] && INST_DATADIR="/var/lib/${INST_NAME}"
@@ -648,27 +649,29 @@ var_escape(){
 env_file_create(){
 
 	if [ $IS_DEBIAN -gt 0 ]; then
-		INIT_ENVFILE="/etc/default/${INST_NAME}"
+		INST_ENVFILE="/etc/default/${INST_NAME}"
 	else
-		INIT_ENVFILE="/etc/sysconfig/${INST_NAME}"
+		INST_ENVFILE="/etc/sysconfig/${INST_NAME}"
 	fi
 
-    error_echo "Creating env file ${INIT_ENVFILE}.."
+    error_echo "Creating env file ${INST_ENVFILE}.."
 
-    if [ -f "$INIT_ENVFILE" ]; then
-        if [ ! -f "${INIT_ENVFILE}.org" ]; then
-            cp "$INIT_ENVFILE" "${INIT_ENVFILE}.org"
+    if [ -f "$INST_ENVFILE" ]; then
+        if [ ! -f "${INST_ENVFILE}.org" ]; then
+            cp "$INST_ENVFILE" "${INST_ENVFILE}.org"
         fi
-        mv -f "$INIT_ENVFILE" "${INIT_ENVFILE}.bak"
+        [ $INST_ENVFILE_LOCK -lt 1 ] && mv -f "$INST_ENVFILE" "${INST_ENVFILE}.bak"
     fi
 
     # Put in a commented Header..
-    echo "# ${INIT_ENVFILE} -- $(timestamp_get_iso8601)" >"$INIT_ENVFILE"
+    [ $INST_ENVFILE_LOCK -lt 1 ] && echo "# ${INST_ENVFILE} -- $(timestamp_get_iso8601)" >"$INST_ENVFILE"
 
-	for ARG in $@
-	do
-		echo "${ARG}=\"${!ARG}\"" >>"$INIT_ENVFILE"
-	done
+	if [ $INST_ENVFILE_LOCK -lt 1 ]; then
+		for ARG in $@
+		do
+			echo "${ARG}=\"${!ARG}\"" >>"$INST_ENVFILE"
+		done
+	fi
 
 }
 
@@ -677,18 +680,18 @@ env_file_create(){
 # env_file_update() Update the service config file with new values, only changing vars that have values..
 ######################################################################################################
 env_file_update(){
-	local LINIT_ENVFILE=
+	local LINST_ENVFILE=
 	local LARG=
 	local LARG_VAL=
 	
 	if [ $IS_DEBIAN -gt 0 ]; then
-		LINIT_ENVFILE="/etc/default/${INST_NAME}"
+		LINST_ENVFILE="/etc/default/${INST_NAME}"
 	else
-		LINIT_ENVFILE="/etc/sysconfig/${INST_NAME}"
+		LINST_ENVFILE="/etc/sysconfig/${INST_NAME}"
 	fi
 
-	if [ ! -f "$LINIT_ENVFILE" ]; then
-		error_exit "Could not find config file ${LINIT_ENVFILE}.."
+	if [ ! -f "$LINST_ENVFILE" ]; then
+		error_exit "Could not find config file ${LINST_ENVFILE}.."
 	fi
 
 	for LARG in $@
@@ -702,17 +705,21 @@ env_file_update(){
 
 			eval $LARG=\$LARG_VAL
 
+			if [ $INST_ENVFILE_LOCK -lt 1 ]; then
 
-			echo "Updating ${LINIT_ENVFILE} with value ${LARG}=\"${!LARG}\""
-			
-			# Update the default file..
-			sed -i -e "s#^${LARG}=.*#${LARG}=\"${!LARG}\"#" "$LINIT_ENVFILE"
+				error_echo "Updating ${LINST_ENVFILE} with value ${LARG}=\"${!LARG}\""
+				
+				# Update the default file..
+				sed -i -e "s#^${LARG}=.*#${LARG}=\"${!LARG}\"#" "$LINST_ENVFILE"
 
-			if [ $(grep -c -E "${LARG}=\"${!LARG}\"" $LINIT_ENVFILE) -lt 1 ]; then
-				error_echo "Could not write value  ${LARG}=\"${!LARG}\" to ${LINIT_ENVFILE}"
-				grep -E "${LARG}=" $LINIT_ENVFILE
-				error_echo sed -i -e "s#^${LARG}=.*#${LARG}=\"${!LARG}\"#" "$LINIT_ENVFILE"
-				exit 1
+				if [ $(grep -c -E "${LARG}=\"${!LARG}\"" $LINST_ENVFILE) -lt 1 ]; then
+					error_echo "Could not write value  ${LARG}=\"${!LARG}\" to ${LINST_ENVFILE}"
+					grep -E "${LARG}=" $LINST_ENVFILE
+					error_echo sed -i -e "s#^${LARG}=.*#${LARG}=\"${!LARG}\"#" "$LINST_ENVFILE"
+					exit 1
+				fi
+			else
+				error_echo "Env file ${LINST_ENVFILE} is locked. Cannot update with value ${LARG}=\"${!LARG}\""
 			fi
 
 		fi
@@ -723,16 +730,16 @@ env_file_update(){
 # env_file_read() Load the var values in the env file..
 ######################################################################################################
 env_file_read(){
-	local LINIT_ENVFILE=
+	local LINST_ENVFILE=
 
 	if [ $IS_DEBIAN -gt 0 ]; then
-		LINIT_ENVFILE="/etc/default/${INST_NAME}"
+		LINST_ENVFILE="/etc/default/${INST_NAME}"
 	else
-		LINIT_ENVFILE="/etc/sysconfig/${INST_NAME}"
+		LINST_ENVFILE="/etc/sysconfig/${INST_NAME}"
 	fi
 
-	if [ -f "$LINIT_ENVFILE" ]; then
-		. "$LINIT_ENVFILE"
+	if [ -f "$LINST_ENVFILE" ]; then
+		. "$LINST_ENVFILE"
 	else
 		return 1
 	fi
@@ -742,18 +749,18 @@ env_file_read(){
 # env_file_show() Show the var values in the env file..
 ######################################################################################################
 env_file_show(){
-	local LINIT_ENVFILE=
+	local LINST_ENVFILE=
 	local LVAR=
 
 	if [ $IS_DEBIAN -gt 0 ]; then
-		LINIT_ENVFILE="/etc/default/${INST_NAME}"
+		LINST_ENVFILE="/etc/default/${INST_NAME}"
 	else
-		LINIT_ENVFILE="/etc/sysconfig/${INST_NAME}"
+		LINST_ENVFILE="/etc/sysconfig/${INST_NAME}"
 	fi
 
-	. "$LINIT_ENVFILE"
+	. "$LINST_ENVFILE"
 
-	for LVAR in $(cat "$LINIT_ENVFILE" | grep -E '^[^# ].*=.*$' | sed -n -e 's/^\([^=]*\).*$/\1/p' | xargs)
+	for LVAR in $(cat "$LINST_ENVFILE" | grep -E '^[^# ].*=.*$' | sed -n -e 's/^\([^=]*\).*$/\1/p' | xargs)
 	do
 		echo "${LVAR}=\"${!LVAR}\""
 	done
@@ -763,19 +770,19 @@ env_file_show(){
 # env_file_remove() Delete the default env file..
 ######################################################################################################
 env_file_remove(){
-	local LINIT_ENVFILE=
+	local LINST_ENVFILE=
 
 	if [ $IS_DEBIAN -gt 0 ]; then
-		LINIT_ENVFILE="/etc/default/${INST_NAME}"
+		LINST_ENVFILE="/etc/default/${INST_NAME}"
 	else
-		LINIT_ENVFILE="/etc/sysconfig/${INST_NAME}"
+		LINST_ENVFILE="/etc/sysconfig/${INST_NAME}"
 	fi
 
-	if [ -f "$LINIT_ENVFILE" ]; then
-		error_echo "Removing env file ${LINIT_ENVFILE}.."
-		rm -f "$LINIT_ENVFILE"
+	if [ -f "$LINST_ENVFILE" ]; then
+		error_echo "Removing env file ${LINST_ENVFILE}.."
+		rm -f "$LINST_ENVFILE"
 	else
-		error_echo "${LINIT_ENVFILE} env not found."
+		error_echo "${LINST_ENVFILE} env not found."
 	fi
 
 }
@@ -786,9 +793,9 @@ env_file_remove(){
 service_is_installed(){
 
 	if [ $IS_DEBIAN -gt 0 ]; then
-		INIT_ENVFILE="/etc/default/${INST_NAME}"
+		INST_ENVFILE="/etc/default/${INST_NAME}"
 	else
-		INIT_ENVFILE="/etc/sysconfig/${INST_NAME}"
+		INST_ENVFILE="/etc/sysconfig/${INST_NAME}"
 	fi
 
 	if [ $USE_UPSTART -gt 0 ]; then
@@ -803,7 +810,7 @@ service_is_installed(){
 		fi
 	fi
 
-	if [ ! -f "$INIT_ENVFILE" ]; then
+	if [ ! -f "$INST_ENVFILE" ]; then
 		return 0
 	fi
 
@@ -2191,9 +2198,9 @@ service_debug_create(){
 	DEBUG_SCRIPT="${INST_BIN}_debug.sh"
 
 	if [ $IS_DEBIAN -gt 0 ]; then
-		INIT_ENVFILE="/etc/default/${INST_NAME}"
+		INST_ENVFILE="/etc/default/${INST_NAME}"
 	else
-		INIT_ENVFILE="/etc/sysconfig/${INST_NAME}"
+		INST_ENVFILE="/etc/sysconfig/${INST_NAME}"
 	fi
 
 	echo "Creating ${DEBUG_SCRIPT}"
@@ -2201,7 +2208,7 @@ service_debug_create(){
 cat >"$DEBUG_SCRIPT" <<DEBUG_SCR1;
 #!/bin/bash
 
-. ${INIT_ENVFILE}
+. ${INST_ENVFILE}
 
 PID_DIR="\$(dirname "$INST_PID")"
 if [ ! -d "\$PID_DIR" ]; then
@@ -2508,9 +2515,9 @@ systemd_unit_file_create(){
     LSZDATE="$(date)"
 
 	if [ $IS_DEBIAN -gt 0 ]; then
-		INIT_ENVFILE="/etc/default/${INST_NAME}"
+		INST_ENVFILE="/etc/default/${INST_NAME}"
 	else
-		INIT_ENVFILE="/etc/sysconfig/${INST_NAME}"
+		INST_ENVFILE="/etc/sysconfig/${INST_NAME}"
 	fi
 
 cat >"$LUNIT_FILE" <<SYSTEMD_SCR1;
@@ -2526,7 +2533,7 @@ After=network-online.target
 Nice=${INST_NICE}
 LimitRTPRIO=${INST_RTPRIO}
 LimitMEMLOCK=${INST_MEMLOCK}
-EnvironmentFile=${INIT_ENVFILE}
+EnvironmentFile=${INST_ENVFILE}
 RuntimeDirectory=${INST_NAME}
 #WorkingDirectory=${INST_NAME}
 Type=simple
