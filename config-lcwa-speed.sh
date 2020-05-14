@@ -4,7 +4,7 @@
 # Bash script for installing Andi Klein's Python LCWA PPPoE Speedtest Logger 
 # as a service on systemd, upstart & sysv systems
 ######################################################################################################
-SCRIPT_VERSION=20200513.224326
+SCRIPT_VERSION=20200513.231830
 REQINCSCRIPTVER=20200422
 
 INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
@@ -256,7 +256,7 @@ env_vars_defaults_get(){
 	[ -z "$LCWA_PRODUCT" ] 			&& LCWA_PRODUCT="$(echo "$INST_NAME" |  tr [a-z] [A-Z])"
 	[ -z "$LCWA_DESC" ] 			&& LCWA_DESC="${LCWA_PRODUCT}-TEST Logger"
 	[ -z "$LCWA_PRODUCTID" ] 		&& LCWA_PRODUCTID="f1a4af09-977c-458a-b3f7-f530fb9029c1"
-	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200513.224326
+	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200513.231830
 	
 	[ -z "$LCWA_USER" ] 			&& LCWA_USER="$INST_USER"
 	[ -z "$LCWA_GROUP" ] 			&& LCWA_GROUP="$INST_GROUP"
@@ -956,11 +956,15 @@ script_update_install(){
 	# Copy
 	if [ -f "$LCWA_UPDATE_SCRIPT" ]; then
 		cp -pf "${LCWA_LOCALSUPREPO}/instsrv_functions.sh" /usr/local/sbin
+		cp -pf "${LCWA_LOCALSUPREPO}/scripts/chkfw.sh" /usr/local/sbin
+		chmod 755 /usr/local/sbin/chkfw.sh
 		cp -pf "$LCWA_UPDATE_SCRIPT" "$LLOCAL_UPDATE_SCRIPT"
 		chmod 755 "$LLOCAL_UPDATE_SCRIPT"
 		touch "--reference=${LCWA_UPDATE_SCRIPT}" "$LLOCAL_UPDATE_SCRIPT"
 	elif [ -f "${SCRIPT_DIR}/scripts/${INST_NAME}-update.sh" ]; then
 		cp -pf "${SCRIPT_DIR}/instsrv_functions.sh" /usr/local/sbin
+		cp -pf "${SCRIPT_DIR}/scripts/chkfw.sh" /usr/local/sbin
+		chmod 755 /usr/local/sbin/chkfw.sh
 		cp -pf "${SCRIPT_DIR}/scripts/${INST_NAME}-update.sh" "$LLOCAL_UPDATE_SCRIPT"
 		chmod 755 "$LLOCAL_UPDATE_SCRIPT"
 		touch "--reference=${SCRIPT_DIR}/scripts/${INST_NAME}-update.sh" "$LLOCAL_UPDATE_SCRIPT"
@@ -1253,8 +1257,8 @@ CONF1
 
 	chmod 755 "$RCLOCAL"
 	
-	cp -pf "$SCRIPT_DIR}/scripts/chkfw.sh" /usr/local/sbin
-	chmod 755 /usr/local/sbin/chkfw.sh
+	#~ cp -pf "$SCRIPT_DIR}/scripts/chkfw.sh" /usr/local/sbin
+	#~ chmod 755 /usr/local/sbin/chkfw.sh
 	
 }
 
