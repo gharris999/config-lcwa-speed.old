@@ -4,7 +4,7 @@
 # Bash script for installing Andi Klein's Python LCWA PPPoE Speedtest Logger 
 # as a service on systemd, upstart & sysv systems
 ######################################################################################################
-SCRIPT_VERSION=20200513.231830
+SCRIPT_VERSION=20200514.173303
 REQINCSCRIPTVER=20200422
 
 INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
@@ -256,7 +256,7 @@ env_vars_defaults_get(){
 	[ -z "$LCWA_PRODUCT" ] 			&& LCWA_PRODUCT="$(echo "$INST_NAME" |  tr [a-z] [A-Z])"
 	[ -z "$LCWA_DESC" ] 			&& LCWA_DESC="${LCWA_PRODUCT}-TEST Logger"
 	[ -z "$LCWA_PRODUCTID" ] 		&& LCWA_PRODUCTID="f1a4af09-977c-458a-b3f7-f530fb9029c1"
-	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200513.231830
+	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200514.173303
 	
 	[ -z "$LCWA_USER" ] 			&& LCWA_USER="$INST_USER"
 	[ -z "$LCWA_GROUP" ] 			&& LCWA_GROUP="$INST_GROUP"
@@ -378,13 +378,17 @@ apt_uninstall(){
 pkg_deps_install(){
 	local LRET=1
 	
+	error_echo "========================================================================================="
+	error_echo "Installing Package Dependencies.." 
+
+	
 	# Make 3 attempts to install packages.  RPi's package repositories have a tendency to time-out..
 	for n in 1 2 3
 	do
 
-		error_echo "Installing Package Dependencies.." 
 		
-		[ $TEST_MODE -lt 1 ] && apt_install gnupg1 \
+		[ $TEST_MODE -lt 1 ] && apt_install bc \
+											gnupg1 \
 											espeak \
 											dnsutils \
 											whois \
@@ -476,6 +480,10 @@ ookla_speedtest_install(){
 	local DEB_DISTRO="$(lsb_release -sc)"
 	local APTLIST_FILE='/etc/apt/sources.list.d/speedtest.list'
 	local LRET=1
+	
+	error_echo "========================================================================================="
+	error_echo "Installing Ookla speedtest CLI"
+
 	
 	if [[ -f "$APTLIST_FILE" ]] && [[ ! -z "$(which speedtest)" ]] && [[ $FORCE -lt 1 ]]; then
 		error_echo "Ookla speedtest already installed.  Use --force to reinstall."
@@ -578,6 +586,7 @@ python_libs_install(){
 	echo "Fixing permissions in /var/lib/${INST_NAME}"
 	chown -R "root:root" "/var/lib/${INST_NAME}"
 	
+	error_echo "========================================================================================="
 	error_echo "Installing python dependencies to ${HOME}/.cache/pip"
 
 	# systems with python2
@@ -1018,9 +1027,9 @@ crontab_entry_add(){
 	systemctl restart cron
 
 	error_echo 'New crontab:'
-	error_echo '======================================================================'
+	error_echo "========================================================================================="
 	crontab -l
-	error_echo '======================================================================'
+	error_echo "========================================================================================="
 }
 
 crontab_entry_remove(){
@@ -1041,9 +1050,9 @@ crontab_entry_remove(){
 	systemctl restart cron
 
 	error_echo 'New crontab:'
-	error_echo '======================================================================'
+	error_echo "========================================================================================="
 	crontab -l
-	error_echo '======================================================================'
+	error_echo "========================================================================================="
 }
 
 # Fixup hostname, /etc/hostname & /etc/hosts with new hostname
@@ -1091,7 +1100,7 @@ hostname_check(){
 
 	# If the current hostname doesn't conform to our specs, prompt for a new hostname
 	if [ "$(hostname | grep -c -E '^LC[0-9]{2}.*$')" -lt 1 ]; then
-		error_echo "====================================================================="
+		error_echo "========================================================================================="
 		error_echo "WARNING: The hostname of this system does not begin with 'LCnn'."
 	fi
 	
@@ -1127,7 +1136,7 @@ banner_display(){
 	#~ LCWA_LOCALREPO
 
 
-	echo '================================================================================='
+	error_echo "========================================================================================="
 	if [ $UNINSTALL -gt 0 ]; then
 		echo "This script REMOVES the ${LCWA_DESC} \"${INST_NAME}\" ${SERVICE_TYPE} service,"
 		echo "running under the \"${INST_USER}\" system account."
@@ -1171,7 +1180,7 @@ banner_display(){
 finish_display(){
 	# Start the service..
 	#service $INSTNAME start
-	echo '================================================================================='
+	error_echo "========================================================================================="
 	echo "Done. ${INST_DESC} is ready to run as a service (daemon)."
 	echo ' '
 	if [ $USE_UPSTART -gt 0 ]; then
@@ -1185,14 +1194,14 @@ finish_display(){
 	if [[ $USE_UPSTART -gt 0 ]] || [[ $USE_SYSTEMD -gt 0 ]]; then
 		echo "Run the command \"${CMD}\" to start the service."
 		echo ' '
-		echo "Run the command \"${LCWA_DEBUG}\" to start the service"
-		echo "in startup debugging mode.  Check the ${LCWA_LOGDIR}/debug.log"
+		echo "Run the command \"${LCWA_DEBUG_SCRIPT}\" to start the service"
+		echo "in debugging mode.  Check the ${LCWA_LOGDIR}/${INST_NAME}-debug.log"
 		echo "file for messages."
 		echo ' '
 		echo "To update the local git repo with the latest channges from"
 		echo "${LCWA_REPO}, run the command:"
 		echo ' '
-		echo "${LCWA_UPDATE}"
+		echo "${LCWA_UPDATE_SCRIPT}"
 		echo ' '
 	else
 		echo "Run the command \"service ${INST_NAME} start\" to start the service."
@@ -1389,7 +1398,7 @@ firewall_set_default(){
 }
 
 # change the default pi user's password to Andi's preferred password
-pi_user_chpasswd(){
+rpi_user_chpasswd(){
 	local LUSER='pi'
 	
 	# LPASS=$(echo 'password' | mkpasswd --method=SHA-256 --stdin)
@@ -1402,6 +1411,95 @@ pi_user_chpasswd(){
 		echo "${LUSER}:${LPASS}" | chpasswd --encrypted
 	fi
 	
+}
+
+# from raspi-config
+rpi_do_change_locale() {
+	local LOCALE="$1"
+	if ! LOCALE_LINE="$(grep "^$LOCALE " /usr/share/i18n/SUPPORTED)"; then
+		return 1
+	fi
+	local ENCODING="$(echo $LOCALE_LINE | cut -f2 -d " ")"
+	echo "$LOCALE $ENCODING" > /etc/locale.gen
+	sed -i "s/^\s*LANG=\S*/LANG=$LOCALE/" /etc/default/locale
+	dpkg-reconfigure -f noninteractive locales
+}
+
+rpi_locale_set(){
+	
+	#~ en_US.UTF-8 UTF-8
+	rpi_do_change_locale 'en_US.UTF-8'
+	
+}
+
+
+#~ # KEYBOARD CONFIGURATION FILE
+
+#~ # Consult the keyboard(5) manual page.
+
+#~ XKBMODEL="pc101"
+#~ XKBLAYOUT="us"
+#~ XKBVARIANT=""
+#~ XKBOPTIONS=""
+
+#~ BACKSPACE="guess"
+
+rpi_do_configure_keyboard() {
+	local MODEL="$1"
+	local KEYMAP="$2"
+	#~ dpkg-reconfigure keyboard-configuration
+	sed -i /etc/default/keyboard -e "s/^XKBMODEL.*/XKBMODEL=\"$MODEL\"/"
+	sed -i /etc/default/keyboard -e "s/^XKBLAYOUT.*/XKBLAYOUT=\"$KEYMAP\"/"
+	dpkg-reconfigure -f noninteractive keyboard-configuration
+	invoke-rc.d keyboard-setup start
+	setsid sh -c 'exec setupcon -k --force <> /dev/tty1 >&0 2>&1'
+	udevadm trigger --subsystem-match=input --action=change
+	return 0
+}
+
+rpi_keyboard_set(){
+	rpi_do_configure_keyboard "pc101" "us"
+}
+
+list_wlan_interfaces() {
+	for dir in /sys/class/net/*/wireless; do
+		if [ -d "$dir" ]; then
+			basename "$(dirname "$dir")"
+		fi
+	done
+}
+
+rpi_do_wifi_country() {
+	local COUNTRY=$1
+	local IFACE="$(list_wlan_interfaces | head -n 1)"
+	
+	if [ -z "$IFACE" ]; then
+		error_echo "No wireless interface found" 
+		return 1
+	fi
+
+	if ! wpa_cli -i "$IFACE" status > /dev/null 2>&1; then
+		error_echo "Could not communicate with wpa_supplicant"
+		return 1
+	fi
+
+	wpa_cli -i "$IFACE" set country "$COUNTRY"
+	wpa_cli -i "$IFACE" save_config > /dev/null 2>&1
+
+	if ! iw reg set "$COUNTRY" 2> /dev/null; then
+		ASK_TO_REBOOT=1
+	fi
+
+	if hash rfkill 2> /dev/null; then
+		rfkill unblock wifi
+	fi
+	
+	error_echo "Wireless LAN country set to $COUNTRY"
+}
+
+
+rpi_wlan_country_set(){
+	rpi_do_wifi_country "US"
 }
 
 # Fixups for Raspberry Pi Raspbian GNU/Linux 10 (buster) systems
@@ -1420,16 +1518,26 @@ rpi_fixups(){
 	fi
 	
 	# This system is a Raspberry Pi running Raspbian.  Fix some things..
+	error_echo "========================================================================================="
 	error_echo "Making Raspberry Pi-specific system settings.."
 	
 	# Reset the system timezone from GMT to local
 	systemd_set_tz
 	
+	# Set the locale
+	rpi_locale_set
+	
+	# Configure the keyboard
+	rpi_keyboard_set
+	
+	# Set the wifi interface country code
+	rpi_wlan_country_set
+	
 	# Configure ufw to allow DHCP/BOOTP & SSH
 	firewall_set_default
 	
 	# Change the default pi user password
-	pi_user_chpasswd
+	rpi_user_chpasswd
 	
 	# Make sure the cron daemon is enabled
 	systemctl enable cron
@@ -1898,12 +2006,20 @@ else
 	# Create a data dir
 	data_dir_create
 
-	echo "Fixing permissions in /var/lib/${INST_NAME}"
+	erro_echo "Fixing permissions in /var/lib/${INST_NAME}"
 	chown -R "${INST_USER}:${INST_GROUP}" "/var/lib/${INST_NAME}"
 
 	# Create a log dir
 	log_dir_create
 	
+	for LOG in "$LCWA_LOGFILE" "$LCWA_ERRFILE" "$LCWA_VCLOG"
+	do
+		touch "$LOG"
+	done
+
+	error_echo "Fixing permissions in /var/log/${INST_NAME}"
+	chown -R "${INST_USER}:${INST_GROUP}" "/var/log/${INST_NAME}"
+
 	# Create the log rotate scripts
 	log_rotate_script_create "$LCWA_LOGFILE"
 	log_rotate_script_create "$LCWA_ERRFILE"

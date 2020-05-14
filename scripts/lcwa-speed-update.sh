@@ -1,7 +1,7 @@
 #!/bin/bash
 # lcwa-speed-update.sh -- script to update lcwa-speed git repo and restart service..
 # Version Control for this script
-SCRIPT_VERSION=20200513.231830
+SCRIPT_VERSION=20200514.173303
 
 INST_NAME='lcwa-speed'
 
@@ -10,8 +10,9 @@ SCRIPT_NAME="$(basename "$0")"
 DEBUG=0
 VERBOSE=0
 FORCE=0
+TEST_ONLY=0
 
-SERVICES_UPDATE=1
+SERVICES_UPDATE=0
 SBIN_UPDATE=0
 OS_UPDATE=0
 REBOOT=0
@@ -160,7 +161,7 @@ services_zip_update(){
 		log_msg "Updating ${SCRIPT} with new verson.."
 		TEMPFILE="$(mktemp -u)"
 		# Download the Services.zip file, keeping the file modification date & time
-		wget --quiet -O "$TEMPFILE" -S "$LURL" >/dev/null 2>&1
+		[ $TEST_ONLY -lt 1 ] && wget --quiet -O "$TEMPFILE" -S "$LURL" >/dev/null 2>&1
 		if [ -f "$TEMPFILE" ]; then
 			cd /tmp
 			unzip -u -o -qq "$TEMPFILE"
@@ -186,7 +187,7 @@ sbin_zip_update(){
 	log_msg "Downloading updated utility scripts.."
 
 	# Download the sbin.zip file, keeping the file modification date & time
-	wget --quiet -O "$TEMPFILE" -S "$LURL" >/dev/null 2>&1
+	[ $TEST_ONLY -lt 1 ] && wget --quiet -O "$TEMPFILE" -S "$LURL" >/dev/null 2>&1
 	
 	if [ -f "$TEMPFILE" ]; then
 		log_msg "Updating ${SCRIPT} with new verson.."
@@ -201,14 +202,14 @@ sbin_zip_update(){
 service_stop() {
 	echo "Stopping ${INST_NAME} service.."
 	if [ $USE_UPSTART -gt 0 ]; then
-		initctl stop "$INST_NAME" >/dev/null 2>&1
+		[ $TEST_ONLY -lt 1 ] && initctl stop "$INST_NAME" >/dev/null 2>&1
 	elif [ $USE_SYSTEMD -gt 0 ]; then
-		systemctl stop "${INST_NAME}.service" >/dev/null 2>&1
+		[ $TEST_ONLY -lt 1 ] && systemctl stop "${INST_NAME}.service" >/dev/null 2>&1
 	else
 		if [ $IS_DEBIAN -gt 0 ]; then
-			service "$INST_NAME" stop >/dev/null 2>&1
+			[ $TEST_ONLY -lt 1 ] && service "$INST_NAME" stop >/dev/null 2>&1
 		else
-			"/etc/rc.d/init.d/${INST_NAME}" stop >/dev/null 2>&1
+			[ $TEST_ONLY -lt 1 ] && "/etc/rc.d/init.d/${INST_NAME}" stop >/dev/null 2>&1
 		fi
 	fi
 
@@ -218,7 +219,7 @@ service_stop() {
 	local LLCWA_PID=$(pgrep -fn "$LCWA_DAEMON")
 
 	if [ ! -z "$LLCWA_PID" ]; then
-		kill -9 "$LLCWA_PID"
+		[ $TEST_ONLY -lt 1 ] && kill -9 "$LLCWA_PID"
 	fi
 
 	return $?
@@ -227,14 +228,14 @@ service_stop() {
 service_start() {
 	echo "Starting ${INST_NAME} service.."
 	if [ $USE_UPSTART -gt 0 ]; then
-		initctl start "$INST_NAME" >/dev/null 2>&1
+		[ $TEST_ONLY -lt 1 ] && initctl start "$INST_NAME" >/dev/null 2>&1
 	elif [ $USE_SYSTEMD -gt 0 ]; then
-		systemctl start "${INST_NAME}.service" >/dev/null 2>&1
+		[ $TEST_ONLY -lt 1 ] && systemctl start "${INST_NAME}.service" >/dev/null 2>&1
 	else
 		if [ $IS_DEBIAN -gt 0 ]; then
-			service "$INST_NAME" start >/dev/null 2>&1
+			[ $TEST_ONLY -lt 1 ] && service "$INST_NAME" start >/dev/null 2>&1
 		else
-			"/etc/rc.d/init.d/${INST_NAME}" start >/dev/null 2>&1
+			[ $TEST_ONLY -lt 1 ] && "/etc/rc.d/init.d/${INST_NAME}" start >/dev/null 2>&1
 		fi
 	fi
 	return $?
@@ -288,12 +289,12 @@ git_in_repo(){
 git_clean(){
 	local LLOCAL_REPO="$1"
 	cd "$LLOCAL_REPO" && git_in_repo "$LLOCAL_REPO"
-	log_msg "Cleaning ${LCWA_LOCALREPO}"
+	log_msg "Cleaning ${LLOCAL_REPO}"
 	if [ -d './.git' ]; then
-		git reset --hard
-		git clean -fd
+		[ $TEST_ONLY -lt 1 ] && git reset --hard
+		[ $TEST_ONLY -lt 1 ] && git clean -fd
 	elif [ -d './.svn' ]; then
-		svn revert -R .
+		[ $TEST_ONLY -lt 1 ] && svn revert -R .
 	fi
 }
 
@@ -304,9 +305,9 @@ git_update(){
 	cd "$LLOCAL_REPO" && git_in_repo "$LLOCAL_REPO" 
 	log_msg "Updating ${LLOCAL_REPO}"
 	if [ -d './.git' ]; then
-		git pull | tee -a "$LCWA_VCLOG"
+		[ $TEST_ONLY -lt 1 ] && git pull | tee -a "$LCWA_VCLOG"
 	elif [ -d './.svn' ]; then
-		svn up | tee -a "$LCWA_VCLOG"
+		[ $TEST_ONLY -lt 1 ] && svn up | tee -a "$LCWA_VCLOG"
 	fi
 	return $?
 }
@@ -352,26 +353,33 @@ script_update_check(){
 		return 100
 	fi
 	
+	log_msg "Checking ${LLOCAL_REPO}/install.xml to see if an update of the ${INST_NAME} service is required."
+	
 	#~ <version>20200511.232252</version>
 	LREPO_VERSION="$(grep -E '<version>[0-9]{8}\.[0-9]{6}</version>' "$LINSTALL_XML" | sed -n -e 's/^.*\([0-9]\{8\}\.[0-9]\{6\}\).*$/\1/p')"
+	
 	if [ $DEBUG -gt 0 ]; then
 		LREPO_EPOCH="$(echo "$LREPO_VERSION" | sed -e 's/\./ /g' | sed -e 's/\([0-9]\{8\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1 \2:\3:\4/')"
 		LREPO_EPOCH="$(date "-d${LREPO_EPOCH}" +%s)"
 		LLCWA_EPOCH="$(echo "$LCWA_VERSION" | sed -e 's/\./ /g' | sed -e 's/\([0-9]\{8\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1 \2:\3:\4/')"
 		LLCWA_EPOCH="$(date "-d${LLCWA_EPOCH}" +%s)"
 		
-		log_msg "Comparing dates"
-		log_msg " Running: [${LLCWA_EPOCH}] $(date_epoch_to_iso8601  ${LLCWA_EPOCH})"
-		log_msg "    Repo: [${LREPO_EPOCH}] $(date_epoch_to_iso8601  ${LREPO_EPOCH})"
+		log_msg "Comparing version timestamps:"
+		log_msg "Running: [${LLCWA_EPOCH}] $(date_epoch_to_iso8601  ${LLCWA_EPOCH})"
+		log_msg "'  Repo: [${LREPO_EPOCH}] $(date_epoch_to_iso8601  ${LREPO_EPOCH})"
 
-		[ $LLCWA_EPOCH -lt $LREPO_EPOCH ] && log_msg "Running ${SCRIPT} version is older than repo ${LLOCAL_REPO} by $(displaytime $(echo "${LREPO_EPOCH} - ${LLCWA_EPOCH}" | bc))." || log_msg "Running ${SCRIPT} version is newer than repo ${LLOCAL_REPO} by $(displaytime $(echo "${LLCWA_EPOCH} - ${LREPO_EPOCH}" | bc))." 
+		if [ $LLCWA_EPOCH -lt $LREPO_EPOCH ]; then
+			log_msg "Running ${SCRIPT} version is older than repo ${LLOCAL_REPO} by $(displaytime $(echo "${LREPO_EPOCH} - ${LLCWA_EPOCH}" | bc))."
+		else
+			log_msg "Running ${SCRIPT} version is newer than repo ${LLOCAL_REPO} by $(displaytime $(echo "${LLCWA_EPOCH} - ${LREPO_EPOCH}" | bc))." 
+		fi
 	fi
 	
 	# If the repo version is greater than our version..
 	if [[ "$LREPO_VERSION" > "$LCWA_VERSION" ]]; then
 		# Update the service
-		log_msg "Updating installed ${INST_NAME} service to version ${LREPO_VERSION} from ${LLOCAL_REPO}config-${INST_NAME}.sh"
-		"${LLOCAL_REPO}/config-${INST_NAME}.sh" --update
+		log_msg "Updating installed ${INST_NAME} service version ${LCWA_VERSION} to new version ${LREPO_VERSION} from ${LLOCAL_REPO}config-${INST_NAME}.sh"
+		[ $TEST_ONLY -lt 1 ] && "${LLOCAL_REPO}/config-${INST_NAME}.sh" --update
 	fi
 	
 }
@@ -384,7 +392,7 @@ sleep_random(){
 	let "RESULT %= $RANGE";
 	RESULT=$(($RESULT+$FLOOR));
 	log_msg "Waiting ${RESULT} seconds before restarting service.."
-	sleep $RESULT
+	[ $TEST_ONLY -lt 1 ] && sleep $RESULT
 }
 
 ################################################################################
@@ -394,8 +402,8 @@ sleep_random(){
 ################################################################################
 
 # Process cmd line args..
-SHORTARGS='hdvf'
-LONGARGS='help,debug,verbose,force,script-update,no-script-update,sbin-update,os-update'
+SHORTARGS='hdvft'
+LONGARGS='help,debug,verbose,force,test,services-update,no-servcies-update,sbin-update,os-update'
 ARGS=$(getopt -o "$SHORTARGS" -l "$LONGARGS"  -n "$(basename $0)" -- "$@")
 
 eval set -- "$ARGS"
@@ -417,10 +425,13 @@ while [ $# -gt 0 ]; do
 		-f|--force)
 			FORCE=1
 			;;
-		--script-update)
+		-t|--test)
+			TEST_ONLY=1
+			;;
+		--services-update)
 			SERVICES_UPDATE=1
 			;;
-		--no-script-update)
+		--no-services-update)
 			SERVICES_UPDATE=0
 			;;
 		--sbin-update)
@@ -463,15 +474,15 @@ fi
 
 if [ $OS_UPDATE -gt 0 ]; then
 	log_msg "Updating operating system.."
-	apt-get update
-	apt-get -y upgrade
+	[ $TEST_ONLY -lt 1 ] && apt-get update
+	[ $TEST_ONLY -lt 1 ] && apt-get -y upgrade
 fi
 
 
 
 if [ $REBOOT -gt 0 ]; then
 	log_msg "${SCRIPT} requries a reboot of this system!"
-	shutdown -r 1 "${SCRIPT} requries a reboot of this system!"
+	[ $TEST_ONLY -lt 1 ] && shutdown -r 1 "${SCRIPT} requries a reboot of this system!"
 else
 	# Sleep for a random number of seconds between 1 a 240 (i.e. 4 minutes)..
 	sleep_random 1 240
