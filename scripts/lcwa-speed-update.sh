@@ -2,7 +2,7 @@
 # lcwa-speed-update.sh -- script to update lcwa-speed git repo and restart service..
 # Version Control for this script
 {
-SCRIPT_VERSION=20200516.220156
+SCRIPT_VERSION=20200516.220629
 
 INST_NAME='lcwa-speed'
 
