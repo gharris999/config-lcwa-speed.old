@@ -834,7 +834,7 @@ ifaces_get(){
 	do
 		# Skip any virtual interfaces..
 		if [ $bINCLUDE_VIRTUAL -lt 1 ] && [ $(ls -l /sys/class/net/ | grep "${LIFACE} ->" | grep -c '/virtual/') -gt 0 ]; then
-			continue
+			[[ "$LIFACE" != "ppp"* ]] && continue
 		fi
 		LIFACES="${LIFACES} ${LIFACE}"
 	done
