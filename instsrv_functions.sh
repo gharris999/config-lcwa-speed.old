@@ -4,7 +4,7 @@
 # Bash include script for generically installing services on upstart, systemd & sysv systems
 # 20190312 -- Gordon Harris
 ######################################################################################################
-INCSCRIPTVER=20200513
+INCSCRIPTVER=20200516
 SCRIPTNAME=$(basename "$0")
 
 # Get the underlying user...i.e. who called sudo..
@@ -867,7 +867,7 @@ ifaces_get_links(){
 
 		# Skip virtual interfaces..
 		if [ $bINCLUDE_VIRTUAL -lt 1 ] && [ $(ls -l /sys/class/net/ | grep "${LIFACE} ->" | grep -c '/virtual/') -gt 0 ]; then
-			continue
+			[[ "$LIFACE" != "ppp"* ]] && continue
 		fi
 
 		# Check to see if the nic is wireless..
