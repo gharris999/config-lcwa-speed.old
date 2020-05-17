@@ -4,7 +4,7 @@
 # Bash include script for generically installing services on upstart, systemd & sysv systems
 # 20190312 -- Gordon Harris
 ######################################################################################################
-INCSCRIPTVER=20200516
+INCSCRIPTVER=20200517
 SCRIPTNAME=$(basename "$0")
 
 # Get the underlying user...i.e. who called sudo..
@@ -3018,8 +3018,17 @@ systemd_unit_file_priority_set(){
 systemd_unit_file_logto_set(){
 	local LSTDLOGFILE="$1"
 	local LERRLOGFILE="$2"
+	local LLOG_TYPE=
 	local SECTION=
 	local ENTRY=
+	
+	if [ $(systemd --version | awk '{print $2}') -ge 240 ]; then
+		LLOG_TYPE='append:'
+	else
+		LLOG_TYPE='file:'
+	fi
+	
+	[ $(systemd --version | grep 'systemd' | awk '{print $2}') -ge 240 ] && LLOG_TYPE='append:' || LLOG_TYPE='file:'
 	
 	if [ -z "$LERRLOGFILE" ]; then
 		LERRLOGFILE="$1"
@@ -3032,15 +3041,15 @@ systemd_unit_file_logto_set(){
 	fi
 	UNIT_FILE="/lib/systemd/system/${UNIT}"
     if [ -f "$UNIT_FILE" ]; then
-		#StandardOutput=file:/var/log/logfile
-		if [ $(grep -E -i -c "^StandardOutput=file:.*$" "$UNIT_FILE") -gt 0 ]; then
+		#StandardOutput=file:|append:/var/log/logfile
+		if [ $(grep -E -i -c "^StandardOutput=.*$" "$UNIT_FILE") -gt 0 ]; then
 			echo "Logging ${UNIT_FILE} StandardOutput to ${LLOGFILE}"
-			sed -i "s#^StandardOutput=.*\$#StandardOutput=file:${LLOGFILE}#" "$UNIT_FILE"
+			sed -i "s#^StandardOutput=.*\$#StandardOutput=${LLOG_TYPE}${LLOGFILE}#" "$UNIT_FILE"
 		else
-			echo "Inserting \"StandardOutput=file:${LLOGFILE}\" into ${UNIT_FILE}.."
+			echo "Inserting \"StandardOutput=${LLOG_TYPE}${LLOGFILE}\" into ${UNIT_FILE}.."
 
 			SECTION="Service"
-			ENTRY="StandardOutput=file:${LSTDLOGFILE}"
+			ENTRY="StandardOutput=${LLOG_TYPE}${LSTDLOGFILE}"
 			sed -i -e '/\['$SECTION'\]/{:a;n;/^$/!ba;i\'"$ENTRY"'' -e '}' "$UNIT_FILE"
 
 			#~ sed -i "0,#^\[Service\].*\$#s##\[Service\]\nStandardOutput=file:${LLOGFILE}#" "$UNIT_FILE"
@@ -3049,14 +3058,14 @@ systemd_unit_file_logto_set(){
 			#~ sed -i "0,/^\[Unit\].*\$/s//\[Unit\]\nWants=${WANTS_ARGS}/" "$UNIT_FILE"
 
 		fi
-		#StandardError=file:/var/log/logfile
-		if [ $(grep -E -i -c "^StandardError=file:.*$" "$UNIT_FILE") -gt 0 ]; then
+		#StandardError=file:|append:/var/log/logfile
+		if [ $(grep -E -i -c "^StandardError=.*$" "$UNIT_FILE") -gt 0 ]; then
 			echo "Logging ${UNIT_FILE} StandardError to ${LLOGFILE}"
-			sed -i "s#^StandardError=.*\$#StandardError=file:${LLOGFILE}#" "$UNIT_FILE"
+			sed -i "s#^StandardError=.*\$#StandardError=${LLOG_TYPE}${LLOGFILE}#" "$UNIT_FILE"
 		else
-			echo "Inserting \"StandardError=file:${LLOGFILE}\" into ${UNIT_FILE}.."
+			echo "Inserting \"StandardError=${LLOG_TYPE}${LLOGFILE}\" into ${UNIT_FILE}.."
 			SECTION="Service"
-			ENTRY="StandardError=file:${LERRLOGFILE}"
+			ENTRY="StandardError=${LLOG_TYPE}${LERRLOGFILE}"
 			sed -i -e '/\['$SECTION'\]/{:a;n;/^$/!ba;i\'"$ENTRY"'' -e '}' "$UNIT_FILE"
 			#~ sed -i "0,#^\[Service\].*\$#s##\[Service\]\nStandardError=file:${LLOGFILE}#" "$UNIT_FILE"
 			#~ sed -i "#^\[Service\].*#a StandardError=file:${LLOGFILE}" "$UNIT_FILE"
