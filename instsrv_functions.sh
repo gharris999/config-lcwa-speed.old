@@ -48,13 +48,14 @@ IS_FEDORA="$(which firewall-cmd 2>/dev/null | wc -l)"
 IS_FOCAL=0
 
 if [ $IS_DEBIAN -gt 0 ]; then
-	# Test to see if is Ubuntu 20.04..
-	UBUNTU_VER="$(lsb_release -rs)"
-	if [[ ! "$UBUNTU_VER" < '20.04' ]]; then
-		IS_FOCAL=1
-	else
-		IS_FOCAL=0
-	fi
+	[ "$(lsb_release -sc)" = 'focal' ] && IS_FOCAL=1
+	#~ # Test to see if is Ubuntu 20.04..
+	#~ UBUNTU_VER="$(lsb_release -rs)"
+	#~ if [[ ! "$UBUNTU_VER" < '20.04' ]]; then
+		#~ IS_FOCAL=1
+	#~ else
+		#~ IS_FOCAL=0
+	#~ fi
 fi
 
 IS_UPSTART=$(initctl version 2>/dev/null | grep -c 'upstart')

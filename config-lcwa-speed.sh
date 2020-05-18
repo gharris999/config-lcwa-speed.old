@@ -4,7 +4,7 @@
 # Bash script for installing Andi Klein's Python LCWA PPPoE Speedtest Logger 
 # as a service on systemd, upstart & sysv systems
 ######################################################################################################
-SCRIPT_VERSION=20200517.100331
+SCRIPT_VERSION=20200517.193113
 REQINCSCRIPTVER=20200422
 
 INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
@@ -35,6 +35,7 @@ NO_PAUSE=0
 FORCE=0
 NO_SCAN=0
 TEST_MODE=0
+INCLUDE_DEPS=1
 
 NEEDSUSER=1
 NEEDSCONF=1
@@ -78,7 +79,7 @@ else
 fi
 
 INST_PATH="/usr/local/share/${INST_NAME}"
-INST_BIN="$(which python3) /usr/local/share/${INST_NAME}/src/test_speed1_3.py"
+INST_BIN="$(which python3) -u /usr/local/share/${INST_NAME}/src/test_speed1_3.py"
 
 SUPINST_PATH="/usr/local/share/config-${INST_NAME}"
 
@@ -141,7 +142,7 @@ HOSTNAME=$(hostname | tr [a-z] [A-Z])
 #~ LCWA_DATADIR="/var/lib/${INST_NAME}/speedfiles"						# Local storage dir for our CSV data
 
 # Command to be launched by the service
-#~ LCWA_DAEMON="$(which python3) ${LCWA_LOCALREPO}/src/test_speed1_3.py"
+#~ LCWA_DAEMON="$(which python3) -u ${LCWA_LOCALREPO}/src/test_speed1_3.py"	# -u arg unbuffers python's output for logging.
 
 
 # Service control variables: pid, priority, memory, etc..
@@ -256,7 +257,7 @@ env_vars_defaults_get(){
 	[ -z "$LCWA_PRODUCT" ] 			&& LCWA_PRODUCT="$(echo "$INST_NAME" |  tr [a-z] [A-Z])"
 	[ -z "$LCWA_DESC" ] 			&& LCWA_DESC="${LCWA_PRODUCT}-TEST Logger"
 	[ -z "$LCWA_PRODUCTID" ] 		&& LCWA_PRODUCTID="f1a4af09-977c-458a-b3f7-f530fb9029c1"
-	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200517.100331
+	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200517.193113
 	
 	[ -z "$LCWA_USER" ] 			&& LCWA_USER="$INST_USER"
 	[ -z "$LCWA_GROUP" ] 			&& LCWA_GROUP="$INST_GROUP"
@@ -380,36 +381,73 @@ pkg_deps_install(){
 	
 	error_echo "========================================================================================="
 	error_echo "Installing Package Dependencies.." 
-
 	
-	# Make 3 attempts to install packages.  RPi's package repositories have a tendency to time-out..
-	for n in 1 2 3
-	do
+	if [ $IS_DEBIAN -gt 0 ]; then
+	
+		# Make 3 attempts to install packages.  RPi's package repositories have a tendency to time-out..
+		for n in 1 2 3
+		do
 
+			
+			[ $TEST_MODE -lt 1 ] && apt_install bc \
+												gnupg1 \
+												espeak \
+												dnsutils \
+												whois \
+												ufw \
+												pulseaudio \
+												build-essential \
+												git \
+												scons \
+												swig \
+												libffi-dev \
+												at-spi2-core
+			LRET=$?
+
+			if [ $LRET -eq 0 ]; then
+				break
+			fi
+			# Problem installing the dependencies..
+			error_echo "Error installing package dependencies...waiting 10 seconds to try again.."
+			sleep 10
+		done
 		
-		[ $TEST_MODE -lt 1 ] && apt_install bc \
-											gnupg1 \
-											espeak \
-											dnsutils \
-											whois \
-											ufw \
-											pulseaudio \
-											build-essential \
-											git \
-											scons \
-											swig \
-											libffi-dev \
-											libffi6 \
-											at-spi2-core
-		LRET=$?
+		for n in 1 2 3
+		do
+			if [ $IS_FOCAL -lt 1 ]; then
+				apt_install libffi6
+				LRET=$?
+			else
+				apt_install libffi7
+				LRET=$?
+			fi
 
-		if [ $LRET -eq 0 ]; then
-			break
-		fi
-		# Problem installing the dependencies..
-		error_echo "Error installing package dependencies...waiting 10 seconds to try again.."
-		sleep 10
-	done
+			if [ $LRET -eq 0 ]; then
+				break
+			fi
+			# Problem installing the dependencies..
+			error_echo "Error installing package dependencies...waiting 10 seconds to try again.."
+			sleep 10
+		done
+	else
+		#Install dependencies for Fedora..
+		dnf install -y bc \
+				gnupg1 \
+				espeak \
+				bind-utils \
+				whois \
+				pulseaudio \
+				git \
+				python3-scons \
+				swig \
+				libffi-devel \
+				libffi \
+				at-spi2-core
+
+		dnf groupinstall -y @development-tools @development-libraries
+
+	fi
+
 
 	return $LRET
 }
@@ -1845,8 +1883,15 @@ elif [ $UPDATE -gt 0 ]; then
 	service_disable
 
 	env_file_create $(env_vars_name)
-
 	env_file_read
+	
+	if [ $INCLUDE_DEPS -gt 0 ]; then
+		#~ ookla_speedtest_install
+		#~ ookla_license_install
+		pkg_deps_install
+		#~ python_libs_install
+	fi
+	
 	data_dir_update
 	log_dir_update
 	
