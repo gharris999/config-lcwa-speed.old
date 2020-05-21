@@ -4,7 +4,7 @@
 # Bash script for installing Andi Klein's Python LCWA PPPoE Speedtest Logger 
 # as a service on systemd, upstart & sysv systems
 ######################################################################################################
-SCRIPT_VERSION=20200520.214333
+SCRIPT_VERSION=20200520.221748
 REQINCSCRIPTVER=20200422
 
 INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
@@ -257,7 +257,7 @@ env_vars_defaults_get(){
 	[ -z "$LCWA_PRODUCT" ] 			&& LCWA_PRODUCT="$(echo "$INST_NAME" |  tr [a-z] [A-Z])"
 	[ -z "$LCWA_DESC" ] 			&& LCWA_DESC="${LCWA_PRODUCT}-TEST Logger"
 	[ -z "$LCWA_PRODUCTID" ] 		&& LCWA_PRODUCTID="f1a4af09-977c-458a-b3f7-f530fb9029c1"
-	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200520.214333
+	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200520.221748
 	
 	[ -z "$LCWA_USER" ] 			&& LCWA_USER="$INST_USER"
 	[ -z "$LCWA_GROUP" ] 			&& LCWA_GROUP="$INST_GROUP"
@@ -640,7 +640,8 @@ python_libs_install(){
 														python3-dev \
 														python3-pip \
 														python-tk \
-														python-gi-cairo
+														python-gi-cairo \
+														pkg-config
 		
 		error_echo "Purging python-pip.." 
 		[ $TEST_MODE -lt 1 ] && apt purge -y python-pip
@@ -669,7 +670,10 @@ python_libs_install(){
 		[ $TEST_MODE -lt 1 ] && apt_install --reinstall python3 \
 														python3-dev \
 														python3-tk \
-														python3-gi-cairo
+														python3-gi-cairo \
+														libfreetype6-dev \
+														libpng-dev \
+														pkg-config
 		
 		error_echo "Purging python3-pip.." 
 		[ $TEST_MODE -lt 1 ] && apt purge -y python3-pip
