@@ -4,7 +4,7 @@
 # Bash script for installing Andi Klein's Python LCWA PPPoE Speedtest Logger 
 # as a service on systemd, upstart & sysv systems
 ######################################################################################################
-SCRIPT_VERSION=20200517.193113
+SCRIPT_VERSION=20200520.214333
 REQINCSCRIPTVER=20200422
 
 INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
@@ -257,7 +257,7 @@ env_vars_defaults_get(){
 	[ -z "$LCWA_PRODUCT" ] 			&& LCWA_PRODUCT="$(echo "$INST_NAME" |  tr [a-z] [A-Z])"
 	[ -z "$LCWA_DESC" ] 			&& LCWA_DESC="${LCWA_PRODUCT}-TEST Logger"
 	[ -z "$LCWA_PRODUCTID" ] 		&& LCWA_PRODUCTID="f1a4af09-977c-458a-b3f7-f530fb9029c1"
-	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200517.193113
+	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200520.214333
 	
 	[ -z "$LCWA_USER" ] 			&& LCWA_USER="$INST_USER"
 	[ -z "$LCWA_GROUP" ] 			&& LCWA_GROUP="$INST_GROUP"
@@ -321,8 +321,9 @@ env_vars_show(){
 
 db_keyfile_install(){
 	
-	if [ -f "$LCWA_DB_KEYFILE" ]; then
-		rm -f "$LCWA_DB_KEYFILE"
+	if [[ -f "$LCWA_DB_KEYFILE" ]] && [[ $FORCE -lt 1 ]]; then
+		error_echo "Dropbox keyfile already installed.  Use --force to reinstall."
+		return 0
 	fi
 
 	error_echo "========================================================================================="
@@ -481,6 +482,7 @@ ookla_license_install(){
 	
 	if [[ -f "$LICENSE_FILE" ]] && [[ $FORCE -lt 1 ]]; then
 		error_echo "Ookla speed test licence file ${LICENSE_FILE} already installed.  Use --force to reinstall."
+		return 0
 	fi
 	
 	error_echo "Running ${OOKLA} to generate a license file.."
@@ -905,8 +907,8 @@ git_repo_create(){
 		exit 1
 	else
 		# local repo exists...update it..
-		git_repo_clean "$LREMOTE_REPO" "$LLOCAL_REPO"
-		git_repo_update "$LREMOTE_REPO" "$LLOCAL_REPO"
+		git_repo_clean "$LLOCAL_REPO"
+		git_repo_update "$LLOCAL_REPO"
 	fi
 
 }
