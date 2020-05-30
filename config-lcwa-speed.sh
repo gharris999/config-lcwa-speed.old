@@ -4,7 +4,7 @@
 # Bash script for installing Andi Klein's Python LCWA PPPoE Speedtest Logger 
 # as a service on systemd, upstart & sysv systems
 ######################################################################################################
-SCRIPT_VERSION=20200529.222605
+SCRIPT_VERSION=20200529.223409
 REQINCSCRIPTVER=20200422
 
 INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
@@ -258,7 +258,7 @@ env_vars_defaults_get(){
 	[ -z "$LCWA_PRODUCT" ] 			&& LCWA_PRODUCT="$(echo "$INST_NAME" |  tr [a-z] [A-Z])"
 	[ -z "$LCWA_DESC" ] 			&& LCWA_DESC="${LCWA_PRODUCT}-TEST Logger"
 	[ -z "$LCWA_PRODUCTID" ] 		&& LCWA_PRODUCTID="f1a4af09-977c-458a-b3f7-f530fb9029c1"
-	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200529.222605
+	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200529.223409
 	
 	[ -z "$LCWA_USER" ] 			&& LCWA_USER="$INST_USER"
 	[ -z "$LCWA_GROUP" ] 			&& LCWA_GROUP="$INST_GROUP"
@@ -296,7 +296,7 @@ env_vars_defaults_get(){
 	[ -z "$LCWA_DEBUG_SCRIPT" ]		&& LCWA_DEBUG_SCRIPT="${LCWA_LOCALSUPREPO}/scripts/${INST_NAME}-debug.sh"
 	[ -z "$LCWA_UPDATE_SCRIPT" ]	&& LCWA_UPDATE_SCRIPT="${LCWA_LOCALSUPREPO}/scripts/${INST_NAME}-update.sh"
 	
-	[ -z "$PYTHONPATH" ] 			&& PYTHONPATH="$(find /usr -type d -name 'site-packages' -exec readlink -f {} \; | head -n 1)"
+	[ -z "$PYTHONPATH" ] 			&& PYTHONPATH="$(find /usr -type d -name 'site-packages' -exec readlink -f {} \; 2>/dev/null | head -n 1)"
 	
 	# Andi's python code needs this variable
 	HOME="/var/lib/${INST_NAME}"
