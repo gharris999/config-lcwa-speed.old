@@ -85,6 +85,18 @@ firewall_subnet_check(){
 			exit 0
 		fi
 	fi
+	
+	# Check to see if we have dhcp..
+	for n in 1 2 3
+	do
+		if [ "$IP_SUBNET" = "127.0.0.0/8" ]; then
+			[ $VERBOSE -gt 0 ] && error_echo "Waiting 3 seconds for dhcp.."
+			sleep 3
+			IP_SUBNET="$(ipaddr_subnet_get)"
+		else
+			break
+		fi
+	done
 
 	if [ "$FW_SUBNET" != "$IP_SUBNET" ]; then
 

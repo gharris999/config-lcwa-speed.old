@@ -4,7 +4,7 @@
 # Bash script for installing Andi Klein's Python LCWA PPPoE Speedtest Logger 
 # as a service on systemd, upstart & sysv systems
 ######################################################################################################
-SCRIPT_VERSION=20200529.215846
+SCRIPT_VERSION=20200529.220402
 REQINCSCRIPTVER=20200422
 
 INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
@@ -35,7 +35,7 @@ NO_PAUSE=0
 FORCE=0
 NO_SCAN=0
 TEST_MODE=0
-INCLUDE_DEPS=1
+UPDATE_DEPS=0
 NO_HOSTNAME_CHANGE=0
 
 NEEDSUSER=1
@@ -258,7 +258,7 @@ env_vars_defaults_get(){
 	[ -z "$LCWA_PRODUCT" ] 			&& LCWA_PRODUCT="$(echo "$INST_NAME" |  tr [a-z] [A-Z])"
 	[ -z "$LCWA_DESC" ] 			&& LCWA_DESC="${LCWA_PRODUCT}-TEST Logger"
 	[ -z "$LCWA_PRODUCTID" ] 		&& LCWA_PRODUCTID="f1a4af09-977c-458a-b3f7-f530fb9029c1"
-	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200529.215846
+	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200529.220402
 	
 	[ -z "$LCWA_USER" ] 			&& LCWA_USER="$INST_USER"
 	[ -z "$LCWA_GROUP" ] 			&& LCWA_GROUP="$INST_GROUP"
@@ -1781,6 +1781,7 @@ noclean,keep,keep-repo,
 disable,
 enable,
 update,
+update-deps,
 high,rtprio
 normal,no-rtprio
 name:,service:,service-name:,
@@ -1883,6 +1884,9 @@ while [ $# -gt 0 ]; do
 			;;
 		--update)
 			UPDATE=1
+			;;
+		--update-deps)
+			UPDATE_DEPS=1
 			;;
 		--user|--instuser|--inst-user)
 			shift
@@ -2014,11 +2018,11 @@ elif [ $UPDATE -gt 0 ]; then
 	env_file_create $(env_vars_name)
 	env_file_read
 	
-	if [ $INCLUDE_DEPS -gt 0 ]; then
+	if [ $UPDATE_DEPS -gt 0 ]; then
 		#~ ookla_speedtest_install
 		#~ ookla_license_install
 		pkg_deps_install
-		#~ python_libs_install
+		python_libs_install
 	fi
 	
 	data_dir_update
