@@ -3068,7 +3068,7 @@ systemd_unit_file_logto_set(){
 	local SECTION=
 	local ENTRY=
 	
-	if [ $(systemd --version | awk '{print $2}') -ge 240 ]; then
+	if [ $(systemctl --version | head -n 1 | awk '{print $2}') -ge 240 ]; then
 		LLOG_TYPE='append:'
 	else
 		LLOG_TYPE='file:'
