@@ -4,7 +4,7 @@
 # Bash script for installing Andi Klein's Python LCWA PPPoE Speedtest Logger 
 # as a service on systemd, upstart & sysv systems
 ######################################################################################################
-SCRIPT_VERSION=20200520.221748
+SCRIPT_VERSION=20200529.215846
 REQINCSCRIPTVER=20200422
 
 INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
@@ -24,7 +24,7 @@ SCRIPTNAME=$(basename $0)
 is_root
 
 HAS_PYTHON2=0
-[ ! -z "$(which python2)" ] && HAS_PYTHON2=1
+[ ! -z "$(which python2 2>/dev/null)" ] && HAS_PYTHON2=1
 
 
 NOPROMPT=0
@@ -36,6 +36,7 @@ FORCE=0
 NO_SCAN=0
 TEST_MODE=0
 INCLUDE_DEPS=1
+NO_HOSTNAME_CHANGE=0
 
 NEEDSUSER=1
 NEEDSCONF=1
@@ -79,7 +80,7 @@ else
 fi
 
 INST_PATH="/usr/local/share/${INST_NAME}"
-INST_BIN="$(which python3) -u /usr/local/share/${INST_NAME}/src/test_speed1_3.py"
+INST_BIN="$(which python3 2>/dev/null) -u /usr/local/share/${INST_NAME}/src/test_speed1_3.py"
 
 SUPINST_PATH="/usr/local/share/config-${INST_NAME}"
 
@@ -142,7 +143,7 @@ HOSTNAME=$(hostname | tr [a-z] [A-Z])
 #~ LCWA_DATADIR="/var/lib/${INST_NAME}/speedfiles"						# Local storage dir for our CSV data
 
 # Command to be launched by the service
-#~ LCWA_DAEMON="$(which python3) -u ${LCWA_LOCALREPO}/src/test_speed1_3.py"	# -u arg unbuffers python's output for logging.
+#~ LCWA_DAEMON="$(which python3 2>/dev/null) -u ${LCWA_LOCALREPO}/src/test_speed1_3.py"	# -u arg unbuffers python's output for logging.
 
 
 # Service control variables: pid, priority, memory, etc..
@@ -257,7 +258,7 @@ env_vars_defaults_get(){
 	[ -z "$LCWA_PRODUCT" ] 			&& LCWA_PRODUCT="$(echo "$INST_NAME" |  tr [a-z] [A-Z])"
 	[ -z "$LCWA_DESC" ] 			&& LCWA_DESC="${LCWA_PRODUCT}-TEST Logger"
 	[ -z "$LCWA_PRODUCTID" ] 		&& LCWA_PRODUCTID="f1a4af09-977c-458a-b3f7-f530fb9029c1"
-	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200520.221748
+	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200529.215846
 	
 	[ -z "$LCWA_USER" ] 			&& LCWA_USER="$INST_USER"
 	[ -z "$LCWA_GROUP" ] 			&& LCWA_GROUP="$INST_GROUP"
@@ -379,92 +380,113 @@ apt_uninstall(){
 ############################################################################
 pkg_deps_install(){
 	local LRET=1
+	local LIBFFI=
 	
 	error_echo "========================================================================================="
 	error_echo "Installing Package Dependencies.." 
 	
-	if [ $IS_DEBIAN -gt 0 ]; then
-	
+	if [ $TEST_MODE -lt 1 ]; then
 		# Make 3 attempts to install packages.  RPi's package repositories have a tendency to time-out..
 		for n in 1 2 3
 		do
-
-			
-			[ $TEST_MODE -lt 1 ] && apt_install bc \
-												gnupg1 \
-												espeak \
-												dnsutils \
-												whois \
-												ufw \
-												pulseaudio \
-												build-essential \
-												git \
-												scons \
-												swig \
-												libffi-dev \
-												at-spi2-core
-			LRET=$?
-
-			if [ $LRET -eq 0 ]; then
-				break
-			fi
-			# Problem installing the dependencies..
-			error_echo "Error installing package dependencies...waiting 10 seconds to try again.."
-			sleep 10
-		done
+	
+			if [ $USE_APT -gt 0 ]; then
 		
-		for n in 1 2 3
-		do
-			if [ $IS_FOCAL -lt 1 ]; then
-				apt_install libffi6
-				LRET=$?
-			else
-				apt_install libffi7
-				LRET=$?
-			fi
+				[ $IS_FOCAL -lt 1 ] && LIBFFI='libffi6' || LIBFFI='libffi7'
 
-			if [ $LRET -eq 0 ]; then
-				break
+				apt_install bc \
+							gnupg1 \
+							espeak \
+							dnsutils \
+							whois \
+							ufw \
+							pulseaudio \
+							build-essential \
+							git \
+							scons \
+							swig \
+							libffi-dev \
+							${LIBFFI} \
+							at-spi2-core
+				LRET=$?
+
+				if [ $LRET -eq 0 ]; then
+					break
+				fi
+				
+			elif [ $USE_YUM -gt 0 ]; then
+				#Install dependencies for Fedora..
+				dnf groupinstall -y "Development Tools"
+				dnf groupinstall -y "C Development Tools and Libraries"
+				LRET=$?
+
+				if [ $LRET -gt 0 ]; then
+					continue
+				fi
+
+				dnf install -y bc \
+						gnupg1 \
+						espeak \
+						bind-utils \
+						whois \
+						pulseaudio \
+						git \
+						python3-scons \
+						swig \
+						libffi-devel \
+						libffi \
+						at-spi2-core
+
+				LRET=$?
+
+				if [ $LRET -eq 0 ]; then
+					break
+				fi
+			
 			fi
+				
 			# Problem installing the dependencies..
 			error_echo "Error installing package dependencies...waiting 10 seconds to try again.."
 			sleep 10
 		done
-	else
-		#Install dependencies for Fedora..
-		dnf install -y bc \
-				gnupg1 \
-				espeak \
-				bind-utils \
-				whois \
-				pulseaudio \
-				git \
-				python3-scons \
-				swig \
-				libffi-devel \
-				libffi \
-				at-spi2-core
-
-		dnf groupinstall -y @development-tools @development-libraries
-
+	
 	fi
-
 
 	return $LRET
 }
 
 pkg_deps_remove(){
+	local LIBFFI=
 	
 	error_echo "Uninstalling Package Dependencies.." 
-	[ $TEST_MODE -lt 1 ] && apt_uninstall gnupg1 \
-										  espeak \
-										  pulseaudio \
-										  scons \
-										  swig \
-										  libffi-dev \
-										  libffi6 \
-										  at-spi2-core
+	if [ $TEST_MODE -lt 1 ]; then
 	
+		if [ $USE_APT -gt 0 ]; then
+
+			[ $IS_FOCAL -lt 1 ] && LIBFFI='libffi6' || LIBFFI='libffi7'
+		
+			apt_uninstall gnupg1 \
+						  espeak \
+						  pulseaudio \
+						  scons \
+						  swig \
+						  libffi-dev \
+						  ${LIBFFI} \
+						  at-spi2-core
+						  
+		elif [ $USE_YUM -gt 0 ]; then
+		
+			dnf remove	gnupg1 \
+						espeak \
+						python3-scons \
+						swig \
+						libffi-devel \
+						libffi \
+						at-spi2-core
+		
+		fi
+	
+	fi
 	
 	return $?
 }
@@ -474,7 +496,7 @@ pkg_deps_remove(){
 #                            license file, copies it to our data directory.
 ############################################################################
 ookla_license_install(){
-	local OOKLA="$(which speedtest)"
+	local OOKLA="$(which speedtest 2>/dev/null)"
 	
 	local LICENSE_SRC='/root/.config/ookla/speedtest-cli.json'
 	local LICENSE_DIR="/var/lib/${INST_NAME}/.config/ookla"
@@ -483,6 +505,11 @@ ookla_license_install(){
 	if [[ -f "$LICENSE_FILE" ]] && [[ $FORCE -lt 1 ]]; then
 		error_echo "Ookla speed test licence file ${LICENSE_FILE} already installed.  Use --force to reinstall."
 		return 0
+	fi
+	
+	if [ -z "$OOKLA" ]; then
+		error_echo "Error: speedtest package is not installed."
+		exit 1
 	fi
 	
 	error_echo "Running ${OOKLA} to generate a license file.."
@@ -516,68 +543,97 @@ ookla_license_remove(){
 #                              ookla speedtest binary.
 ############################################################################
 ookla_speedtest_install(){
-	
-	local DEB_DISTRO="$(lsb_release -sc)"
-	local APTLIST_FILE='/etc/apt/sources.list.d/speedtest.list'
+	local DEB_DISTRO=
+	local APTLIST_FILE=
 	local LRET=1
 	
 	error_echo "========================================================================================="
 	error_echo "Installing Ookla speedtest CLI"
 
 	
-	if [[ -f "$APTLIST_FILE" ]] && [[ ! -z "$(which speedtest)" ]] && [[ $FORCE -lt 1 ]]; then
+	if [[ ! -z "$(which speedtest 2>/dev/null)" ]] && [[ $FORCE -lt 1 ]]; then
 		error_echo "Ookla speedtest already installed.  Use --force to reinstall."
 		return 0
 	fi
 	
-	export INSTALL_KEY=379CE192D401AB61
-	export DEB_DISTRO=$(lsb_release -sc)
-	apt-key adv --keyserver keyserver.ubuntu.com --recv-keys $INSTALL_KEY
-	
-	
-	if [ -f "$APTLIST_FILE" ]; then
-		# Remove any old reference to ookla.bintray.com
-		sed -i "/^.*ookla\.bintray\.com.*\$/d" "$APTLIST_FILE"
-	else
-		error_echo "Creating ${APTLIST_FILE} in apt sources.."
-		touch "$APTLIST_FILE"
-	fi
+	# For debian, ubuntu, raspbian, etc.
+	if [ $USE_APT -gt 0 ]; then
+		DEB_DISTRO="$(lsb_release -sc)"
+		APTLIST_FILE='/etc/apt/sources.list.d/speedtest.list'
 
-	error_echo "Adding ookla ${DEB_DISTRO} source to ${APTLIST_FILE}.."
-	echo "deb https://ookla.bintray.com/debian ${DEB_DISTRO} main" >>"$APTLIST_FILE"
-	
-	error_echo "Updating apt.."
-	#~ E: The repository 'https://ookla.bintray.com/debian focal Release' does not have a Release file.
-	if [ $(apt-get update 2>&1 | grep -c -E "ookla\.bintray\.com.*${DEB_DISTRO}.*does not have a Release file") -gt 0 ]; then
-		DEB_DISTRO='bionic'
-		sed -i "/^.*ookla\.bintray\.com.*\$/d" "$APTLIST_FILE"
+		export INSTALL_KEY='379CE192D401AB61'
+		export DEB_DISTRO="$(lsb_release -sc)"
+		apt-key adv --keyserver keyserver.ubuntu.com --recv-keys $INSTALL_KEY
+		
+		
+		if [ -f "$APTLIST_FILE" ]; then
+			# Remove any old reference to ookla.bintray.com
+			sed -i "/^.*ookla\.bintray\.com.*\$/d" "$APTLIST_FILE"
+		else
+			error_echo "Creating ${APTLIST_FILE} in apt sources.."
+			touch "$APTLIST_FILE"
+		fi
+
 		error_echo "Adding ookla ${DEB_DISTRO} source to ${APTLIST_FILE}.."
 		echo "deb https://ookla.bintray.com/debian ${DEB_DISTRO} main" >>"$APTLIST_FILE"
+		
 		error_echo "Updating apt.."
+		#~ E: The repository 'https://ookla.bintray.com/debian focal Release' does not have a Release file.
 		if [ $(apt-get update 2>&1 | grep -c -E "ookla\.bintray\.com.*${DEB_DISTRO}.*does not have a Release file") -gt 0 ]; then
-			error_echo "Error: Could not find a valid package source for ookla speedtest."
-			# Install speedtest-cli instead?
-			return 1
-		fi
-	fi
-	
-	if [ $TEST_MODE -lt 1 ]; then
-		# Make 3 attempts to install packages.  RPi's package repositories have a tendency to time-out..
-		for n in 1 2 3
-		do
-
-			error_echo "Installing Ookla speedtest package.." 
-			apt_install speedtest
-			LRET=$?
-
-			if [ $LRET -eq 0 ]; then
-				break
+			DEB_DISTRO='bionic'
+			sed -i "/^.*ookla\.bintray\.com.*\$/d" "$APTLIST_FILE"
+			error_echo "Adding ookla ${DEB_DISTRO} source to ${APTLIST_FILE}.."
+			echo "deb https://ookla.bintray.com/debian ${DEB_DISTRO} main" >>"$APTLIST_FILE"
+			error_echo "Updating apt.."
+			if [ $(apt-get update 2>&1 | grep -c -E "ookla\.bintray\.com.*${DEB_DISTRO}.*does not have a Release file") -gt 0 ]; then
+				error_echo "Error: Could not find a valid package source for ookla speedtest."
+				# Install speedtest-cli instead?
+				return 1
 			fi
-			# Problem installing the dependencies..
-			error_echo "Error installing package dependencies...waiting 10 seconds to try again.."
-			sleep 10
+		fi
+		
+		if [ $TEST_MODE -lt 1 ]; then
+			# Make 3 attempts to install packages.  RPi's package repositories have a tendency to time-out..
+			for n in 1 2 3
+			do
 
-		done
+				error_echo "Installing Ookla speedtest package.." 
+				apt_install speedtest
+				LRET=$?
+
+				if [ $LRET -eq 0 ]; then
+					break
+				fi
+				# Problem installing the dependencies..
+				error_echo "Error installing Ookla speedtest package...waiting 10 seconds to try again.."
+				sleep 10
+
+			done
+		fi
+		
+	# For Fedora, CentOS, RH, etc.
+	elif [ $USE_YUM -gt 0 ]; then
+	
+		error_echo "Adding ookla rpm repo to /etc/yum.repos.d.."
+		wget https://bintray.com/ookla/rhel/rpm -O /tmp/bintray-ookla-rhel.repo
+		mv -f /tmp/bintray-ookla-rhel.repo /etc/yum.repos.d/
+		if [ $TEST_MODE -lt 1 ]; then
+			for n in 1 2 3
+			do
+				error_echo "Installing Ookla speedtest package.." 
+				dnf -y --refresh install speedtest
+				LRET=$?
+
+				if [ $LRET -eq 0 ]; then
+					break
+				fi
+				# Problem installing the dependencies..
+				error_echo "Error installing Ookla speedtest package...waiting 10 seconds to try again.."
+				sleep 10
+
+			done
+		fi
+	
 	fi
 	
 	return $LRET
@@ -589,18 +645,24 @@ ookla_speedtest_install(){
 ############################################################################
 ookla_speedtest_remove(){
 	
-	local APTLIST_FILE='/etc/apt/sources.list.d/speedtest.list'
-	local SPEEDTEST_BIN="$(which speedtest)"
+	local LLIST_FILE=
+	local LSPEEDTEST_BIN="$(which speedtest 2>/dev/null)"
 	
-	if [ ! -z "$SPEEDTEST_BIN" ]; then
-		error_echo "Uninstalling ${SPEEDTEST_BIN}"
-		[ $TEST_MODE -lt 1 ] && apt remove -y speedtest
-		[ $TEST_MODE -lt 1 ] && apt autoremove
+	if [ ! -z "$LSPEEDTEST_BIN" ]; then
+		error_echo "Uninstalling ${LSPEEDTEST_BIN}"
+		if [ $USE_APT -gt 0 ]; then
+			[ $TEST_MODE -lt 1 ] && apt remove -y speedtest
+			[ $TEST_MODE -lt 1 ] && apt autoremove
+			LLIST_FILE='/etc/apt/sources.list.d/speedtest.list'
+		elif [ $USE_YUM -gt 0 ]; then
+			[ $TEST_MODE -lt 1 ] && dnf remove -y speedtest
+			LLIST_FILE='/etc/yum.repos.d/bintray-ookla-rhel.repo'
+		fi
 	fi
 	
-	if [ -f "$APTLIST_FILE" ]; then
-		error_echo "Removing ${APTLIST_FILE} from apt sources.."
-		[ $TEST_MODE -lt 1 ] && rm -f "$APTLIST_FILE"
+	if [ -f "$LLIST_FILE" ]; then
+		error_echo "Removing ${LLIST_FILE} from package sources.."
+		[ $TEST_MODE -lt 1 ] && rm -f "$LLIST_FILE"
 	fi
 }
 
@@ -641,6 +703,8 @@ python_libs_install(){
 														python3-pip \
 														python-tk \
 														python-gi-cairo \
+														libfreetype6-dev \
+														libpng-dev \
 														pkg-config
 		
 		error_echo "Purging python-pip.." 
@@ -664,35 +728,87 @@ python_libs_install(){
 																matplotlib
 
 	else
-	
-		error_echo "Reinstalling python3.." 
+		
+		#python3 installs..
+		
+		if [ $TEST_MODE -lt 1 ]; then
+			# Make 3 attempts to install packages.  RPi's package repositories have a tendency to time-out..
+			for n in 1 2 3
+			do
+				error_echo "Reinstalling python3.." 
+				if [ $USE_APT -gt 0 ]; then
+					apt_install --reinstall python3 \
+											python3-dev \
+											python3-tk \
+											python3-gi-cairo \
+											libfreetype6-dev \
+											libpng-dev \
+											pkg-config
 
-		[ $TEST_MODE -lt 1 ] && apt_install --reinstall python3 \
-														python3-dev \
-														python3-tk \
-														python3-gi-cairo \
-														libfreetype6-dev \
-														libpng-dev \
-														pkg-config
+					LRET=$?
+				elif [ $USE_YUM -gt 0 ]; then
+					dnf install -y	python3 \
+									python3-devel \
+									python3-tkinter\
+									python3-gobject \
+									gtk3 \
+									freetype-devel \
+									libpng-devel \
+									pkgconf-pkg-config
+					LRET=$?
+				fi
+
+				if [ $LRET -eq 0 ]; then
+					break
+				fi
+				# Problem installing the dependencies..
+				error_echo "Error reinstalling python3...waiting 10 seconds to try again.."
+				sleep 10
+
+			done
+		fi
+		
 		
 		error_echo "Purging python3-pip.." 
-		[ $TEST_MODE -lt 1 ] && apt purge -y python3-pip
-		
-		apt -y autoremove
+		if [ $TEST_MODE -lt 1 ]; then
+			if [ $USE_APT -gt 0 ]; then
+				apt purge -y python3-pip
+				apt -y autoremove
+			elif [ $USE_YUM -gt 0 ]; then
+				dnf remove -y python3-pip
+				dnf autoremove -y
+				dnf distro-sync -y
+			fi
+		fi
 		
 		error_echo "Reinstalling python3-pip direct from Python Packaging Authority.." 
 		[ $TEST_MODE -lt 1 ] && wget https://bootstrap.pypa.io/get-pip.py
 		[ $TEST_MODE -lt 1 ] && python3 get-pip.py
 		[ $TEST_MODE -lt 1 ] && pip3 install --upgrade pip
 
-		error_echo "Installing python dependencies.." 
+		if [ $TEST_MODE -lt 1 ]; then
+			# Make 3 attempts to install packages.  RPi's package repositories have a tendency to time-out..
+			for n in 1 2 3
+			do
+				error_echo "Installing python libraries.." 
 
-		[ $TEST_MODE -lt 1 ] && pip3 install --force-reinstall  testresources \
-																backports.functools_lru_cache \
-																pydig \
-																dropbox \
-																cairocffi \
-																matplotlib
+				pip3 install --force-reinstall  testresources \
+												backports.functools_lru_cache \
+												pydig \
+												dropbox \
+												cairocffi \
+												matplotlib
+				LRET=$?
+
+				if [ $LRET -eq 0 ]; then
+					break
+				fi
+				# Problem installing the dependencies..
+				error_echo "Error installing python3 libraries...waiting 10 seconds to try again.."
+				sleep 10
+
+			done
+		fi
 	fi
 
 	
@@ -1046,7 +1162,7 @@ script_update_remove(){
 
 crontab_entry_add(){
 	local COMMENT='#Everyday, at 5 minutes past midnight, update ${INST_NAME} and restart the service:'
-	local EVENT="5 0 * * * ${LCWA_UPDATE_SCRIPT} --debug | $(which logger) -t ${LCWA_SERVICE}"
+	local EVENT="5 0 * * * ${LCWA_UPDATE_SCRIPT} --debug | $(which logger 2>/dev/null) -t ${LCWA_SERVICE}"
 	#~ local EVENT='5 0 * * * /usr/local/share/config-lcwa-speed/scripts/lcwa-speed-update.sh --debug --force --sbin-update'
 	local ROOTCRONTAB='/var/spool/cron/crontabs/root'
 	
@@ -1107,7 +1223,7 @@ hostname_fix(){
 	local LCONFFILE='/etc/hostname'
 	local LHOSTSFILE='/etc/hosts'
 	
-	if [ ! -z "$(which hostnamectl)" ]; then
+	if [ ! -z "$(which hostnamectl 2>/dev/null)" ]; then
 		error_echo "Changing hostname from ${LOLDHOSTNAME} to ${LNEWHOSTNAME}.."
 		hostnamectl set-hostname "$LNEWHOSTNAME"
 	fi
@@ -1264,6 +1380,8 @@ finish_display(){
 
 rclocal_create(){
 	local RCLOCAL='/etc/rc.local'
+	
+	[ $IS_FEDORA -gt 0 ] && return 0
 
 	if [ -f "$RCLOCAL" ]; then
 		if [ ! -f "${RCLOCAL}.org" ]; then
@@ -1335,7 +1453,7 @@ admin_user_create(){
 			# For Fedora, use a different encryption method for useradd password..
 			#~ LPASS=$(openssl passwd -1 'password')
 			LPASS='$1$d195eGhJ$Y4se8E/44F0.KBMzkg0pX1'
-			useradd --create-home --shell "$(which bash)" --user-group --groups sudo --password "$LPASS" "$LUSER"
+			useradd --create-home --shell "$(which bash 2>/dev/null)" --user-group --groups sudo --password "$LPASS" "$LUSER"
 		fi
 	fi
 	
@@ -1343,7 +1461,7 @@ admin_user_create(){
 
 systemd_set_tz(){
 	# Check the timezone we're set to..
-	TIMEDATECTL="$(which timedatectl)"
+	TIMEDATECTL="$(which timedatectl 2>/dev/null)"
 
 	if [ ! -z "$TIMEDATECTL" ]; then
 		SYSTZ="$(timedatectl status | grep 'zone:' | sed -n -e 's/^.*: \(.*\) (.*$/\1/p')"
@@ -1550,7 +1668,7 @@ rpi_wlan_country_set(){
 rpi_fixups(){
 	local IS_RPI=0
 	
-	if [ -z "$(which lsb_release)" ]; then
+	if [ -z "$(which lsb_release 2>/dev/null)" ]; then
 		return 1
 	fi
 
@@ -1645,6 +1763,8 @@ verbose,
 quiet,
 force,
 env-lock,
+no-host-change,
+no-host-check,
 python2,
 python3,
 no-pause,
@@ -1721,6 +1841,9 @@ while [ $# -gt 0 ]; do
 			;;
 		--env-lock)
 			INST_ENVFILE_LOCK=1
+			;;
+		--no-host-change|--no-host-check)
+			NO_HOSTNAME_CHANGE=1
 			;;
 		--all|--allrevs|--all-revs)
 			ALLREVS=1
@@ -1943,7 +2066,7 @@ elif [ $UPDATE -gt 0 ]; then
 	service_enable
 	service_start
 	service_status
-	hostname_check
+	[ $NO_HOSTNAME_CHANGE -lt 1 ] && hostname_check
 
 ########################################################################################
 # UNINSTALL
@@ -2022,8 +2145,14 @@ else
 	fi
 	
 	# Check the hostname and change it if necessary..
-	hostname_check
+	[ $NO_HOSTNAME_CHANGE -lt 1 ] && hostname_check
 	
+	# Check the timezone..
+	systemd_set_tz
+	
+	# Fixup RPi specifics..
+	rpi_fixups
+
 	# Create the service account
 	inst_user_create
 
@@ -2039,9 +2168,6 @@ else
 	ookla_license_install
 	pkg_deps_install
 	python_libs_install
-
-	# Fixup RPi specifics..
-	rpi_fixups
 
 	# Check and install or update the main repo..
 	git_repo_create "$LCWA_REPO" "$LCWA_REPO_BRANCH" "$LCWA_LOCALREPO"
@@ -2109,7 +2235,7 @@ else
 	finish_display
 	
 	#Final warning if the hostname isn't LCXX
-	hostname_check
+	[ $NO_HOSTNAME_CHANGE -lt 1 ] && hostname_check
 fi
 
 exit 0

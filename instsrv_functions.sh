@@ -69,6 +69,15 @@ USE_UFW="$(which ufw 2>/dev/null | wc -l)"
 
 IS_NETPLAN="$(which netplan 2>/dev/null | wc -l)"
 
+
+IS_DHCPCD="$(which dhcpcd 2>/dev/null | wc -l)"
+
+if [[ $IS_DHCPCD -gt 0 ]] && [[ $IS_SYSTEMD -gt 0 ]]; then
+	systemctl is-active --quiet dhcpcd.service
+	[ $? -eq 0 ] && IS_DHCPCD=1 || IS_DHCPCD=0
+fi
+
+
 # https://ask.fedoraproject.org/en/question/49738/how-to-check-if-system-is-rpm-or-debian-based/
 #~ /usr/bin/rpm -q -f /usr/bin/rpm >/dev/null 2>&1
 #~ [ $? -eq 0 ] && IS_FEDORA=1 || IS_FEDORA=0
@@ -789,7 +798,8 @@ env_file_remove(){
 }
 
 ######################################################################################################
-# service_is_installed() Check to see that the service is installed..
+# service_is_installed() Check to see that the service is installed.  
+#   Returns 1 if installed (i.e. opposite of is_service()
 ######################################################################################################
 service_is_installed(){
 
@@ -2086,6 +2096,41 @@ service_priority_set(){
 		INST_MEMLOCK=
 	fi
 
+}
+
+
+######################################################################################################
+# is_service( service_name ) -- returns 0 if the 
+######################################################################################################
+is_service(){
+	local LSERVICE_NAME="$1"
+	local LSERVICE_FILE=
+	local LUNIT_DIR=
+	
+	[ -z "$LSERVICE_NAME" ] && LSERVICE_NAME="$INST_NAME"
+	
+	if [ $USE_SYSTEMD -gt 0 ]; then
+		# Likely places to find unit files..
+		for LUNIT_DIR in '/lib/systemd/system' '/etc/systemd/system'
+		do
+			LSERVICE_FILE="${LUNIT_DIR}/${LSERVICE_NAME}.service"
+			if [ -f "$LSERVICE_FILE" ]; then
+				systemctl is-active --quiet "$LSERVICE_FILE" && return 0 || return 1
+			fi
+		done
+		return 1
+	elif [ $USE_UPSTART -gt 0 ]; then
+		LSERVICE_FILE="/etc/init/${LSERVICE_NAME}.conf"
+	else
+		if [ $IS_DEBIAN -gt 0 ]; then
+			LSERVICE_FILE="/etc/init.d/${LSERVICE_NAME}"
+		else
+			LSERVICE_FILE="/etc/rc.d/init.d/${LSERVICE_NAME}"
+		fi
+	fi
+	
+	[ -f "${LSERVICE_FILE}" ] && return 0 || return 1
+	
 }
 
 ######################################################################################################
