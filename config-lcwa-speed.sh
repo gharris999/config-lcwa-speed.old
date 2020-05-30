@@ -4,7 +4,7 @@
 # Bash script for installing Andi Klein's Python LCWA PPPoE Speedtest Logger 
 # as a service on systemd, upstart & sysv systems
 ######################################################################################################
-SCRIPT_VERSION=20200529.222408
+SCRIPT_VERSION=20200529.222605
 REQINCSCRIPTVER=20200422
 
 INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
@@ -258,7 +258,7 @@ env_vars_defaults_get(){
 	[ -z "$LCWA_PRODUCT" ] 			&& LCWA_PRODUCT="$(echo "$INST_NAME" |  tr [a-z] [A-Z])"
 	[ -z "$LCWA_DESC" ] 			&& LCWA_DESC="${LCWA_PRODUCT}-TEST Logger"
 	[ -z "$LCWA_PRODUCTID" ] 		&& LCWA_PRODUCTID="f1a4af09-977c-458a-b3f7-f530fb9029c1"
-	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200529.222408
+	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200529.222605
 	
 	[ -z "$LCWA_USER" ] 			&& LCWA_USER="$INST_USER"
 	[ -z "$LCWA_GROUP" ] 			&& LCWA_GROUP="$INST_GROUP"
@@ -1161,7 +1161,7 @@ script_update_remove(){
 }
 
 crontab_entry_add(){
-	local COMMENT='#Everyday, at 5 minutes past midnight, update ${INST_NAME} and restart the service:'
+	local COMMENT="#Everyday, at 5 minutes past midnight, update ${INST_NAME} and restart the service:"
 	local EVENT="5 0 * * * ${LCWA_UPDATE_SCRIPT} --debug | $(which logger 2>/dev/null) -t ${LCWA_SERVICE}"
 	#~ local EVENT='5 0 * * * /usr/local/share/config-lcwa-speed/scripts/lcwa-speed-update.sh --debug --force --sbin-update'
 	#~ local EVENT='5 0 * * * /usr/local/share/config-lcwa-speed/scripts/lcwa-speed-update.sh --debug | /usr/bin/logger -t lcwa-speed'
