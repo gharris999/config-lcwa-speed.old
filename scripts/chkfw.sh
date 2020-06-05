@@ -69,19 +69,20 @@ trim(){
 }
 
 firewall_subnet_check(){
-	local IP_SUBNET="$(ipaddr_subnet_get)"
-	local FW_SUBNET="$(sudo ufw status | grep -m1 ALLOW | awk '{print $3}')"
-	local IFACE=
-
-	[ $VERBOSE -gt 0 ] && error_echo "${SCRIPT}: Checking firewall subnet.."
+	local FW_SUBNETS="$(sudo ufw status | grep ALLOW | awk '{print $3}' | sort | uniq | xargs)"
+	local FW_SUBNET=
+	local LIFACE="$(iface_primary_getb)"
+	local IP_SUBNET="$(iface_subnet_get "$LIFACE")"
+	
+	[ $VERBOSE -gt 0 ] && error_echo "${SCRIPT}: Checking firewall subnet against ${LIFACE} ${IP_SUBNET}.."
 
 	# If there's no IP or link, don't attempt to change the firewall..
 	if [ -z "$IP_SUBNET" ]; then
-		IFACE="$(iface_primary_get)"
-		iface_has_link "$IFACE"
+		LIFACE="$(iface_primary_get)"
+		iface_has_link "$LIFACE"
 		if [ $? -gt 0 ]; then
 			# if there is no link (e.g. ethernet not plugged in) give up immediatly without changing anything..
-			[ $VERBOSE -gt 0 ] && error_echo "Iface ${IFACE} has no ip or link."
+			[ $VERBOSE -gt 0 ] && error_echo "Iface ${LIFACE} has no ip or link."
 			exit 0
 		fi
 	fi
@@ -97,19 +98,23 @@ firewall_subnet_check(){
 			break
 		fi
 	done
-
-	if [ "$FW_SUBNET" != "$IP_SUBNET" ]; then
-
-		[ $VERBOSE -gt 0 ] && error_echo "Iface Subnet: '${IP_SUBNET}' does not match firewall subnet: '${FW_SUBNET}'"
-		[ $VERBOSE -gt 0 ] && error_echo "Reconfiguring firewall.."
-
-		if [ $MINIMAL -gt 0 ]; then
-			config-firewall.sh --minimal
-		else
-			config-firewall.sh
+	
+	for FW_SUBNET in $FW_SUBNETS
+	do
+		if [ "$FW_SUBNET" = "$IP_SUBNET" ]; then
+			[ $VERBOSE -gt 0 ] && error_echo "Iface ${LIFACE} Subnet: '${IP_SUBNET}' matches firewall subnet: '${FW_SUBNET}'"
+			return 0
 		fi
+	done
+	
+
+	[ $VERBOSE -gt 0 ] && error_echo "Iface ${LIFACE} Subnet: '${IP_SUBNET}' does not match firewall subnet: '${FW_SUBNET}'"
+	[ $VERBOSE -gt 0 ] && error_echo "Reconfiguring firewall.."
+
+	if [ $MINIMAL -gt 0 ]; then
+		[ $TEST -lt 1 ] && config-firewall.sh --minimal
 	else
-		[ $VERBOSE -gt 0 ] && error_echo "Iface Subnet: '${IP_SUBNET}' matches firewall subnet: '${FW_SUBNET}'"
+		[ $TEST -lt 1 ] && config-firewall.sh
 	fi
 	
 }
