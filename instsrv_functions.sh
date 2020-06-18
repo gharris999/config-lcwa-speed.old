@@ -4,11 +4,14 @@
 # Bash include script for generically installing services on upstart, systemd & sysv systems
 # 20190312 -- Gordon Harris
 ######################################################################################################
-INCSCRIPTVER=20200517
+INCSCRIPTVER=20200608
 SCRIPTNAME=$(basename "$0")
 
 # Get the underlying user...i.e. who called sudo..
-UUSER="$(who am i | awk '{print $1}')"
+UUSER="$(logname 2>/dev/null)"
+[ -z "$UUSER" ] && UUSER="$(who am i | awk '{print $1}')"
+[ -z "$UUSER" ] && UUSER="$(awk -F':' '{ if($7 ~ /\/bin\/bash/ && $1 !~ /root/) {print $1; exit} };0' /etc/passwd)"
+
 
 NOPROMPT=0
 QUIET=0
@@ -221,7 +224,7 @@ date_epoch_to_iso8601u(){
 }
 
 error_log(){
-	echo "${SCRIPT} $(timestamp_get_iso8601) " "$@" >"$INST_LOGFILE"
+	echo "${SCRIPT} $(timestamp_get_iso8601) " "$@" >>"$INST_LOGFILE"
 }
 
 ######################################################################################################

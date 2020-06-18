@@ -4,7 +4,7 @@
 # Bash script for installing Andi Klein's Python LCWA PPPoE Speedtest Logger 
 # as a service on systemd, upstart & sysv systems
 ######################################################################################################
-SCRIPT_VERSION=20200604.224741
+SCRIPT_VERSION=20200617.231028
 REQINCSCRIPTVER=20200422
 
 INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
@@ -258,7 +258,7 @@ env_vars_defaults_get(){
 	[ -z "$LCWA_PRODUCT" ] 			&& LCWA_PRODUCT="$(echo "$INST_NAME" |  tr [a-z] [A-Z])"
 	[ -z "$LCWA_DESC" ] 			&& LCWA_DESC="${LCWA_PRODUCT}-TEST Logger"
 	[ -z "$LCWA_PRODUCTID" ] 		&& LCWA_PRODUCTID="f1a4af09-977c-458a-b3f7-f530fb9029c1"
-	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200604.224741
+	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200617.231028
 	
 	[ -z "$LCWA_USER" ] 			&& LCWA_USER="$INST_USER"
 	[ -z "$LCWA_GROUP" ] 			&& LCWA_GROUP="$INST_GROUP"
@@ -400,6 +400,7 @@ pkg_deps_install(){
 							dnsutils \
 							whois \
 							ufw \
+							sshpass \
 							pulseaudio \
 							build-essential \
 							git \
@@ -429,6 +430,7 @@ pkg_deps_install(){
 						espeak \
 						bind-utils \
 						whois \
+						sshpass \
 						pulseaudio \
 						git \
 						python3-scons \
@@ -1577,17 +1579,52 @@ rpi_user_chpasswd(){
 	
 }
 
-# from raspi-config
+# adapted from raspi-config
 rpi_do_change_locale() {
-	local LOCALE="$1"
-	if ! LOCALE_LINE="$(grep "^$LOCALE " /usr/share/i18n/SUPPORTED)"; then
+	local LLOCALE="$1"
+	local LLOCALE_LINE=
+	local LLOCALE_ENCODING=
+	local LCONF_FILE=
+	local LLOCALE_CURRENT="$(locale | grep 'LANG=' | sed -n -e 's/^LANG=\(.*\)$/\1/p')"
+	
+	if [ "$LLOCALE" = "$LLOCALE_CURRENT" ]; then
+		error_echo "Locale ${LLOCALE_CURRENT} already set to ${LLOCALE}"
+		return 0
+	fi
+	
+	error_echo "Attempting to change locale to ${LLOCALE}"
+	
+	if ! LLOCALE_LINE="$(grep -E "^${LLOCALE} " /usr/share/i18n/SUPPORTED)"; then
+		error_echo "Error: Locale ${LLOCALE} is not supported."
 		return 1
 	fi
-	local ENCODING="$(echo $LOCALE_LINE | cut -f2 -d " ")"
-	echo "$LOCALE $ENCODING" > /etc/locale.gen
-	sed -i "s/^\s*LANG=\S*/LANG=$LOCALE/" /etc/default/locale
+	
+	LLOCALE_ENCODING="$(echo $LLOCALE_LINE | cut -f2 -d " ")"
+	
+	[ $DEBUG -gt 0 ] && error_echo "LLOCALE_ENCODING == ${LLOCALE_ENCODING}"
+	
+	LCONF_FILE='/etc/locale.gen'
+	[ ! -f "${LCONF_FILE}.org" ] && cp -p "$LCONF_FILE" "${LCONF_FILE}.org"
+	
+	# Comment all non-commented lines..
+	sed -i 's/^\([^#]\)/# \1/g' "$LCONF_FILE"
+
+	# Uncomment our locale
+	sed -i "s/^# ${LLOCALE} ${LLOCALE_ENCODING}/${LLOCALE} ${LLOCALE_ENCODING}/" "$LCONF_FILE"
+	
+	if [ $(grep -c -E "^${LLOCALE} ${LLOCALE_ENCODING}" "$LCONF_FILE") -lt 1 ]; then
+		echo "$LLOCALE $LLOCALE_ENCODING" >> "$LCONF_FILE"
+	fi
+	
+	
+	LCONF_FILE='/etc/default/locale'
+	[ ! -f "${LCONF_FILE}.org" ] && cp -p "$LCONF_FILE" "${LCONF_FILE}.org"
+	sed -i "s/^\s*LANG=\S*/LANG=$LLOCALE/" "$LCONF_FILE"
+	
 	dpkg-reconfigure -f noninteractive locales
+
 }
+
 
 rpi_locale_set(){
 	
@@ -1698,6 +1735,7 @@ rpi_fixups(){
 	rpi_wlan_country_set
 	
 	# Configure ufw to allow DHCP/BOOTP & SSH
+	[ -z "$(which ufw)" ] && apt_install ufw
 	firewall_set_default
 	
 	# Change the default pi user password
