@@ -4,7 +4,7 @@
 # Bash script for installing Andi Klein's Python LCWA PPPoE Speedtest Logger 
 # as a service on systemd, upstart & sysv systems
 ######################################################################################################
-SCRIPT_VERSION=20200715.115733
+SCRIPT_VERSION=20200715.121057
 REQINCSCRIPTVER=20200422
 
 INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
@@ -252,13 +252,13 @@ env_vars_name(){
 ######################################################################################################
 env_vars_defaults_get(){
 
-    echo "Getting Defaults.."
+    error_echo "Getting Defaults.."
 
 	[ -z "$LCWA_SERVICE" ] 			&& LCWA_SERVICE="$INST_NAME"
 	[ -z "$LCWA_PRODUCT" ] 			&& LCWA_PRODUCT="$(echo "$INST_NAME" |  tr [a-z] [A-Z])"
 	[ -z "$LCWA_DESC" ] 			&& LCWA_DESC="${LCWA_PRODUCT}-TEST Logger"
 	[ -z "$LCWA_PRODUCTID" ] 		&& LCWA_PRODUCTID="f1a4af09-977c-458a-b3f7-f530fb9029c1"
-	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200715.115733
+	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200715.121057
 	
 	[ -z "$LCWA_USER" ] 			&& LCWA_USER="$INST_USER"
 	[ -z "$LCWA_GROUP" ] 			&& LCWA_GROUP="$INST_GROUP"
@@ -687,7 +687,7 @@ python_libs_install(){
 	local CURCD="$(pwd)"
 	cd /tmp
 	
-	echo "Fixing permissions in /var/lib/${INST_NAME}"
+	error_echo "Fixing permissions in /var/lib/${INST_NAME}"
 	chown -R "root:root" "/var/lib/${INST_NAME}"
 	
 	error_echo "========================================================================================="
@@ -876,7 +876,7 @@ python_libs_remove(){
 inst_dir_create(){
 	INST_PATH="$LCWA_LOCALREPO"
 	if [ ! -d "$INST_PATH" ]; then
-		echo "Creating ${INST_PATH}.."
+		error_echo "Creating ${INST_PATH}.."
 		mkdir -p "$INST_PATH"
 	fi
 
@@ -888,7 +888,7 @@ inst_dir_create(){
 inst_dir_remove(){
 	local LINST_PATH="$1"
 	if [ -d "$LINST_PATH" ]; then
-		echo "Removing ${LINST_PATH}.."
+		error_echo "Removing ${LINST_PATH}.."
 		rm -Rf "$LINST_PATH"
 	fi
 
@@ -901,8 +901,8 @@ in_repo(){
 	local LLOCAL_REPO="$1"
 	
 	if [ $(pwd) != "$LLOCAL_REPO" ]; then
-		echo "Error: Could not find ${LLOCAL_REPO}"
-		echo "${SCRIPTNAME} must exit.."
+		error_echo "Error: Could not find ${LLOCAL_REPO}"
+		error_echo "${SCRIPTNAME} must exit.."
 		exit 1
 	fi
 }
@@ -933,8 +933,8 @@ git_repo_check(){
 
 	# We don't care if the source is http:// or git://
 	if [ "${LTHIS_REPO##*//}" != "${LREMOTE_REPO##*//}" ]; then
-		echo "Error: ${LLOCAL_REPO} is not a git repository for ${LREMOTE_REPO}."
-		echo "  git reports ${LTHIS_REPO} as the source."
+		error_echo "Error: ${LLOCAL_REPO} is not a git repository for ${LREMOTE_REPO}."
+		error_echo "  git reports ${LTHIS_REPO} as the source."
 		return 5
 	fi
 
@@ -948,13 +948,13 @@ git_repo_check(){
 git_repo_show() {
 	local LLOCAL_REPO="$1"
 
-	echo "Getting ${LLOCAL_REPO} status.."
+	error_echo "Getting ${LLOCAL_REPO} status.."
 	cd "$LLOCAL_REPO" && in_repo "$LLOCAL_REPO"
-	git remote show origin
-	echo "Available brances in ${LLOCAL_REPO}:"
-	git branch -r
-	echo "Status of ${LLOCAL_REPO}:"
-	git status
+	git remote show origin >&2
+	error_echo "Available brances in ${LLOCAL_REPO}:"
+	git branch -r >&2
+	error_echo "Status of ${LLOCAL_REPO}:"
+	git status >&2
 }
 
 
@@ -969,20 +969,20 @@ git_repo_clone(){
 	# Cloning to --depth 1 (i.e. only most recent revs) results in a dirsize of
 	# about 250M for /usr/share/lms/server
 	if [ $ALLREVS -gt 0 ]; then
-		git clone "$LREMOTE_REPO" "$LLOCAL_REPO"
+		git clone "$LREMOTE_REPO" "$LLOCAL_REPO" >&2
 	else
-		git clone --depth 1 "$LREMOTE_REPO" "$LLOCAL_REPO"
+		git clone --depth 1 "$LREMOTE_REPO" "$LLOCAL_REPO" >&2
 	fi
 
 	if [ $? -gt 0 ]; then
-		echo "Error cloning ${LREMOTE_REPO}...script must halt."
+		error_echo "Error cloning ${LREMOTE_REPO}...script must halt."
 		exit 1
 	fi
 
 	#~ cd "$LLOCAL_REPO" && in_repo "$LLOCAL_REPO"
 	#~ git status
 	
-	git_repo_show "$LLOCAL_REPO"
+	git_repo_show "$LLOCAL_REPO" >&2
 }
 
 #------------------------------------------------------------------------------
@@ -992,15 +992,15 @@ git_repo_checkout(){
 	local LBRANCH="$1"
 	local LLOCAL_REPO="$2"
 
-	echo "Checking out branch ${LBRANCH} to ${LLOCAL_REPO}.."
+	error_echo "Checking out branch ${LBRANCH} to ${LLOCAL_REPO}.."
 
 	cd "$LLOCAL_REPO" && in_repo "$LLOCAL_REPO"
 
 	#check out the new branch..
-	git checkout "$LBRANCH"
+	git checkout "$LBRANCH" >&2
 
 	if [ $? -gt 0 ]; then
-		echo "Error checking out branch ${LBRANCH}."
+		error_echo "Error checking out branch ${LBRANCH}."
 		git_repo_show "$LLOCAL_REPO"
 		return 1
 	fi
@@ -1041,11 +1041,11 @@ git_repo_create(){
 git_repo_clean(){
 	local LLOCAL_REPO="$1"
 	cd "$LLOCAL_REPO" && in_repo "$LLOCAL_REPO"
-	echo "Cleaning ${LLOCAL_REPO}.."
-	git reset --hard
-	git clean -fd
+	error_echo "Cleaning ${LLOCAL_REPO}.."
+	git reset --hard >&2
+	git clean -fd >&2
 	if [ $? -gt 0 ]; then
-		echo "Error cleaning ${LLOCAL_REPO}...script must halt."
+		error_echo "Error cleaning ${LLOCAL_REPO}...script must halt."
 		exit 1
 	fi
 }
@@ -1057,9 +1057,9 @@ git_repo_update(){
 	local LLOCAL_REPO="$1"
 	cd "$LLOCAL_REPO" && in_repo "$LLOCAL_REPO"
 	error_echo "Updating ${LLOCAL_REPO}.."
-	git pull
+	git pull >&2
 	if [ $? -gt 0 ]; then
-		echo "Error updating ${LLOCAL_REPO}...script must halt."
+		error_echo "Error updating ${LLOCAL_REPO}...script must halt."
 		exit 1
 	fi
 }
