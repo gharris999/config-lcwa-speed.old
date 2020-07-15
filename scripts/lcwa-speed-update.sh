@@ -2,7 +2,7 @@
 # lcwa-speed-update.sh -- script to update lcwa-speed git repo and restart service..
 # Version Control for this script
 
-SCRIPT_VERSION=20200715.121057
+SCRIPT_VERSION=20200715.121355
 
 INST_NAME='lcwa-speed'
 
@@ -201,7 +201,7 @@ sbin_zip_update(){
 }
 
 service_stop() {
-	echo "Stopping ${INST_NAME} service.."
+	error_echo "Stopping ${INST_NAME} service.."
 	if [ $USE_UPSTART -gt 0 ]; then
 		[ $TEST_ONLY -lt 1 ] && initctl stop "$INST_NAME" >/dev/null 2>&1
 	elif [ $USE_SYSTEMD -gt 0 ]; then
@@ -227,7 +227,7 @@ service_stop() {
 }
 
 service_start() {
-	echo "Starting ${INST_NAME} service.."
+	error_echo "Starting ${INST_NAME} service.."
 	if [ $USE_UPSTART -gt 0 ]; then
 		[ $TEST_ONLY -lt 1 ] && initctl start "$INST_NAME" >/dev/null 2>&1
 	elif [ $USE_SYSTEMD -gt 0 ]; then
@@ -261,7 +261,7 @@ service_status() {
 			LSERVICE="${LSERVICE}.service"
 		fi
 		# returns 0 if service running; returns 3 if service is stopped, dead or not installed..
-		systemctl --no-pager status "$LSERVICE"
+		systemctl --no-pager status "$LSERVICE" >&2
 	else
 		# returns 0 if service is running, returns 1 if unrecognized service
 		if [ $IS_DEBIAN -gt 0 ]; then
