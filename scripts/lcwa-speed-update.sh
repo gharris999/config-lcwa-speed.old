@@ -2,7 +2,7 @@
 # lcwa-speed-update.sh -- script to update lcwa-speed git repo and restart service..
 # Version Control for this script
 
-SCRIPT_VERSION=20200715.170237
+SCRIPT_VERSION=20200721.183941
 
 INST_NAME='lcwa-speed'
 
@@ -303,9 +303,11 @@ git_clean(){
 # Update the repo..
 git_update(){
 	local LLOCAL_REPO="$1"
+	local LLOCAL_BRANCH="$2"
 	cd "$LLOCAL_REPO" && git_in_repo "$LLOCAL_REPO" 
 	log_msg "Updating ${LLOCAL_REPO}"
 	if [ -d './.git' ]; then
+		[ $TEST_ONLY -lt 1 ] && git branch --set-upstream-to=${LLOCAL_BRANCH} master
 		[ $TEST_ONLY -lt 1 ] && git pull | tee -a "$LCWA_VCLOG"
 	elif [ -d './.svn' ]; then
 		[ $TEST_ONLY -lt 1 ] && svn up | tee -a "$LCWA_VCLOG"
@@ -315,8 +317,9 @@ git_update(){
 
 git_update_do() {
 	local LLOCAL_REPO="$1"
+	local LLOCAL_BRANCH="$2"
 	git_clean "$LLOCAL_REPO" 
-	git_update "$LLOCAL_REPO" && status=0 || status=$?
+	git_update "$LLOCAL_REPO" "$LLOCAL_BRANCH" && status=0 || status=$?
 	if [ $status -eq 0 ]; then
 		log_msg "${LLOCAL_REPO} has been updated."
 	else
@@ -326,6 +329,7 @@ git_update_do() {
 
 git_check_up_to_date(){
 	local LLOCAL_REPO="$1"
+	local LLOCAL_BRANCH="$2"
 	
 	cd "$LLOCAL_REPO" && git_in_repo "$LLOCAL_REPO" 
 	if [ -d './.git' ]; then
@@ -336,7 +340,7 @@ git_check_up_to_date(){
 			return 0
 		else
 			log_msg "Local repository ${LLOCAL_REPO} requires update."
-			git_update_do "$LLOCAL_REPO"
+			git_update_do "$LLOCAL_REPO" "$LLOCAL_BRANCH"
 			return 1
 		fi
 	fi
@@ -454,10 +458,10 @@ env_file_read
 service_stop
 
 # Check and update Andi's repo..
-git_check_up_to_date "$LCWA_LOCALREPO"
+git_check_up_to_date "$LCWA_LOCALREPO" "$LCWA_REPO_BRANCH"
 
 # Check & update the suplimental repo (contains this script)
-git_check_up_to_date "$LCWA_LOCALSUPREPO"
+git_check_up_to_date "$LCWA_LOCALSUPREPO" "$LCWA_SUPREPO_BRANCH"
 
 # Service version is: $LCWA_VERSION
 # See if we need to update the service installation
