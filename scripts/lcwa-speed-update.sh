@@ -2,7 +2,7 @@
 # lcwa-speed-update.sh -- script to update lcwa-speed git repo and restart service..
 # Version Control for this script
 
-SCRIPT_VERSION=20200721.183941
+SCRIPT_VERSION=20200721.185507
 
 INST_NAME='lcwa-speed'
 
@@ -307,8 +307,9 @@ git_update(){
 	cd "$LLOCAL_REPO" && git_in_repo "$LLOCAL_REPO" 
 	log_msg "Updating ${LLOCAL_REPO}"
 	if [ -d './.git' ]; then
-		[ $TEST_ONLY -lt 1 ] && git branch --set-upstream-to=${LLOCAL_BRANCH} master
-		[ $TEST_ONLY -lt 1 ] && git pull | tee -a "$LCWA_VCLOG"
+		#~ [ $TEST_ONLY -lt 1 ] && git branch --set-upstream-to=${LLOCAL_BRANCH} master
+		LLOCAL_BRANCH="$(echo "$LLOCAL_BRANCH" | tr '/' ' ')"
+		[ $TEST_ONLY -lt 1 ] && git pull $LLOCAL_BRANCH | tee -a "$LCWA_VCLOG"
 	elif [ -d './.svn' ]; then
 		[ $TEST_ONLY -lt 1 ] && svn up | tee -a "$LCWA_VCLOG"
 	fi
