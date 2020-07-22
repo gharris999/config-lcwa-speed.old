@@ -4,7 +4,7 @@
 # Bash script for installing Andi Klein's Python LCWA PPPoE Speedtest Logger 
 # as a service on systemd, upstart & sysv systems
 ######################################################################################################
-SCRIPT_VERSION=20200715.170237
+SCRIPT_VERSION=20200721.182203
 REQINCSCRIPTVER=20200422
 
 INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
@@ -147,6 +147,7 @@ HOSTNAME=$(hostname | tr [a-z] [A-Z])
 
 
 # Service control variables: pid, priority, memory, etc..
+#~ LCWA_RESTARTSECS=60
 #~ LCWA_PIDFILE="/var/run/${INST_NAME}/${INST_NAME}.pid"
 #~ LCWA_NICE=-19
 #~ LCWA_RTPRIO=45
@@ -154,6 +155,8 @@ HOSTNAME=$(hostname | tr [a-z] [A-Z])
 #~ LCWA_CLEARLOG=1
 
 # Utility Scripts
+#~ LCWA_CHKFW_SCRIPT="${LCWA_LOCALSUPREPO}/scripts/chkfw.sh"
+#~ LCWA_CHKNET_SCRIPT="${LCWA_LOCALSUPREPO}/scripts/chknet.sh"
 #~ LCWA_DEBUG_SCRIPT="${LCWA_LOCALSUPREPO}/scripts/${INST_NAME}-debug.sh"
 #~ LCWA_UPDATE_SCRIPT="${LCWA_LOCALSUPREPO}/scripts/${INST_NAME}-update.sh"
 
@@ -195,12 +198,14 @@ LCWA_DAEMON=
 LCWA_EXEC_ARGS=
 LCWA_EXEC_ARGS_DEBUG=
 
+LCWA_RESTARTSECS=
 LCWA_PIDFILE=
 LCWA_NICE=
 LCWA_RTPRIO=
 LCWA_MEMLOCK=
 LCWA_CLEARLOG=
 
+LCWA_CHKNET_SCRIPT=
 LCWA_DEBUG_SCRIPT=
 LCWA_UPDATE_SCRIPT=
 
@@ -236,11 +241,14 @@ env_vars_name(){
 "LCWA_DAEMON" \
 "LCWA_EXEC_ARGS" \
 "LCWA_EXEC_ARGS_DEBUG" \
+"LCWA_RESTARTSECS" \
 "LCWA_PIDFILE" \
 "LCWA_NICE" \
 "LCWA_RTPRIO" \
 "LCWA_MEMLOCK" \
 "LCWA_CLEARLOG" \
+"LCWA_CHKFW_SCRIPT" \
+"LCWA_CHKNET_SCRIPT" \
 "LCWA_DEBUG_SCRIPT" \
 "LCWA_UPDATE_SCRIPT" \
 "PYTHONPATH" \
@@ -258,7 +266,7 @@ env_vars_defaults_get(){
 	[ -z "$LCWA_PRODUCT" ] 			&& LCWA_PRODUCT="$(echo "$INST_NAME" |  tr [a-z] [A-Z])"
 	[ -z "$LCWA_DESC" ] 			&& LCWA_DESC="${LCWA_PRODUCT}-TEST Logger"
 	[ -z "$LCWA_PRODUCTID" ] 		&& LCWA_PRODUCTID="f1a4af09-977c-458a-b3f7-f530fb9029c1"
-	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200715.170237
+	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200721.182203
 	
 	[ -z "$LCWA_USER" ] 			&& LCWA_USER="$INST_USER"
 	[ -z "$LCWA_GROUP" ] 			&& LCWA_GROUP="$INST_GROUP"
@@ -288,11 +296,14 @@ env_vars_defaults_get(){
 	[ -z "$LCWA_EXEC_ARGS" ] 		&& LCWA_EXEC_ARGS="--time \${LCWA_TESTFREQ} --dpfile \${LCWA_DB_KEYFILE} --serverid \${LCWA_OKLA_SRVRID}"
 	[ -z "$LCWA_EXEC_ARGS_DEBUG" ] 	&& LCWA_EXEC_ARGS_DEBUG="--adebug --time \${LCWA_TESTFREQ} --dpfile \${LCWA_DB_KEYFILE} --serverid \${LCWA_OKLA_SRVRID}"
 	
+	[ -z "$LCWA_RESTARTSECS" ] 		&& LCWA_RESTARTSECS='60'
 	[ -z "$LCWA_NICE" ] 			&& LCWA_NICE="$INST_NICE"
 	[ -z "$LCWA_RTPRIO" ]			&& LCWA_RTPRIO="$INST_RTPRIO"
 	[ -z "$LCWA_MEMLOCK" ]			&& LCWA_MEMLOCK="$INST_MEMLOCK"
 	[ -z "$LCWA_CLEARLOG" ] 		&& LCWA_CLEARLOG=1
 
+	[ -z "$LCWA_CHKFW_SCRIPT" ]		&& LCWA_CHKNET_SCRIPT="${LCWA_LOCALSUPREPO}/scripts/chkfw.sh"
+	[ -z "$LCWA_CHKNET_SCRIPT" ]	&& LCWA_CHKNET_SCRIPT="${LCWA_LOCALSUPREPO}/scripts/chknet.sh"
 	[ -z "$LCWA_DEBUG_SCRIPT" ]		&& LCWA_DEBUG_SCRIPT="${LCWA_LOCALSUPREPO}/scripts/${INST_NAME}-debug.sh"
 	[ -z "$LCWA_UPDATE_SCRIPT" ]	&& LCWA_UPDATE_SCRIPT="${LCWA_LOCALSUPREPO}/scripts/${INST_NAME}-update.sh"
 	
@@ -1423,7 +1434,7 @@ chmod 1777 /tmp
 #
 ########################################################################################
 
-/usr/local/sbin/chkfw.sh --verbose --minimal
+${LCWA_CHKFW_SCRIPT} --verbose --minimal
 
 exit 0
 
@@ -1431,6 +1442,7 @@ exit 0
 CONF1
 
 	chmod 755 "$RCLOCAL"
+	chmod 755 "$LCWA_CHKFW_SCRIPT"
 	
 	#~ cp -pf "$SCRIPT_DIR}/scripts/chkfw.sh" /usr/local/sbin
 	#~ chmod 755 /usr/local/sbin/chkfw.sh
@@ -2069,9 +2081,9 @@ elif [ $UPDATE -gt 0 ]; then
 	log_dir_update
 	
 	# Create the log rotate scripts
-	log_rotate_script_create "$LCWA_LOGFILE"
-	log_rotate_script_create "$LCWA_ERRFILE"
-	log_rotate_script_create "$LCWA_VCLOG"
+	log_rotate_script_create "$LCWA_LOGFILE" '30'
+	log_rotate_script_create "$LCWA_ERRFILE" '30'
+	log_rotate_script_create "$LCWA_VCLOG" '30'
 	
 	# Check and install or update the main repo..
 	git_repo_create "$LCWA_REPO" "$LCWA_REPO_BRANCH" "$LCWA_LOCALREPO"
@@ -2086,6 +2098,8 @@ elif [ $UPDATE -gt 0 ]; then
 		upstart_conf_file_create_nopid "$LCWA_EXEC_ARGS"
 	elif [ $USE_SYSTEMD -gt 0 ]; then
 		systemd_unit_file_create "$LCWA_EXEC_ARGS"
+		systemd_unit_file_prestart_set 
+		systemd_unit_file_restartsecs_set "$LCWA_RESTARTSECS"
 		systemd_unit_file_pidfile_remove		
 		systemd_unit_file_logto_set "$LCWA_LOGFILE" "$LCWA_ERRFILE"
 	else
@@ -2250,6 +2264,8 @@ else
 		upstart_conf_file_create_nopid "$LCWA_EXEC_ARGS"
 	elif [ $USE_SYSTEMD -gt 0 ]; then
 		systemd_unit_file_create "$LCWA_EXEC_ARGS"
+		systemd_unit_file_prestart_set "$LCWA_CHKNET_SCRIPT"
+		systemd_unit_file_restartsecs_set "$LCWA_RESTARTSECS"
 		systemd_unit_file_pidfile_remove		
 		systemd_unit_file_logto_set "$LCWA_LOGFILE" "/var/log/${INST_NAME}/${INST_NAME}-error.log"
 	else

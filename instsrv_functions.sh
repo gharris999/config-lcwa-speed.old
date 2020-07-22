@@ -2,9 +2,9 @@
 
 ######################################################################################################
 # Bash include script for generically installing services on upstart, systemd & sysv systems
-# 20190312 -- Gordon Harris
+# 20200721 -- Gordon Harris
 ######################################################################################################
-INCSCRIPTVER=20200608
+INCSCRIPTVER=20200721
 SCRIPTNAME=$(basename "$0")
 
 # Get the underlying user...i.e. who called sudo..
@@ -532,10 +532,16 @@ log_dir_remove(){
 log_rotate_script_create(){
 
 	local LLOG_FILE="$1"
+	local LLOG_ROTATE_COUNT="$2"
 
 	if [ -z "$LLOG_FILE" ]; then
 		LLOG_FILE="/var/log/${INST_NAME}/${INST_NAME}.log"
 	fi
+	
+	if [ -z "$LLOG_ROTATE_COUNT" ]; then
+		LLOG_ROTATE_COUNT='5'
+	fi
+	
 
 	local LBASENAME="$(basename "$LLOG_FILE")"
 	LBASENAME="${LBASENAME%%.*}"
@@ -556,7 +562,7 @@ ${LLOG_FILE} {
     weekly
     notifempty
     compress
-    rotate 5
+    rotate ${LLOG_ROTATE_COUNT}
     size 20k
 }
 LOGROTATESCR
@@ -2872,6 +2878,36 @@ systemd_unit_file_restart_set(){
 		else
 			echo "Inserting \"Restart=${RESTART_ARGS}\" into ${UNIT_FILE}.."
 			sed -i "0,/^\[Service\].*\$/s//\[Service\]\nRestart=${TYPE_ARGS}/" "$UNIT_FILE"
+		fi
+	fi
+}
+
+######################################################################################################
+# systemd_unit_file_restartsecs_set() Change the restart seconds
+######################################################################################################
+systemd_unit_file_restartsecs_set(){
+	RESTART_ARGS="$@"
+
+	if [ -z "$RESTART_ARGS" ]; then
+		RESTART_ARGS='5'
+	fi
+
+	if [ $(echo "$INST_NAME" | grep -c -e '.*\..*') -gt 0 ]; then
+		UNIT="$INST_NAME"
+	else
+		UNIT="${INST_NAME}.service"
+	fi
+	UNIT_FILE="/lib/systemd/system/${UNIT}"
+
+	#RestartSec=60
+
+    if [ -f "$UNIT_FILE" ]; then
+		if [ $(grep -c -E '^Restart=.*$' "$UNIT_FILE") -gt 0 ]; then
+			echo "Changing ${UNIT_FILE} RestartSec to ${RESTART_ARGS}"
+			sed -i "s/^RestartSec=.*\$/Restart=${RESTART_ARGS}/" "$UNIT_FILE"
+		else
+			echo "Inserting \"RestartSec=${RESTART_ARGS}\" into ${UNIT_FILE}.."
+			sed -i "0,/^\[Service\].*\$/s//\[Service\]\nRestartSec=${TYPE_ARGS}/" "$UNIT_FILE"
 		fi
 	fi
 }

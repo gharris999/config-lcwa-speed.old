@@ -1,10 +1,10 @@
 #!/bin/bash
 
-# Script to check that firewall matches the dhcp client subnet on boot.  Called from rc.local
+# Script to check network status on service start.  Called from lcwa-speed.service
 #
 #
 
-SCRIPT_VERSION=20200721.170201
+SCRIPT_VERSION=20200721.174126
 
  
 INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
@@ -19,6 +19,10 @@ VERBOSE=0
 TEST=0
 MINIMAL=0
 
+iso_date(){
+	date --iso-8601=s
+}
+
 ########################################################################################
 # get_links_wait( $NETDEV) Tests to see if an interface is linked. returns 0 == linked; 1 == no link;
 ########################################################################################
@@ -29,97 +33,27 @@ get_links_wait(){
 	local LIFACE=
 	local n=0
 
-	# Make 5 attempts to find a link..
-	for n in 1 2 3 4 5
+	# Make 6 attempts to find a link..
+	for n in 1 2 3 4 5 6
 	do
-		# Find the 1st (sorted alpha) networking interface with a good link status..
-		#~ for LIFACE in $(ifaces_get)
-		#~ do
-			#~ #Check the link status..
-			#~ iface_has_link "$LIFACE"
-			#~ if [ $? -eq 0 ]; then
-				#~ LIFACES="${LIFACES} ${LIFACE}"
-			#~ fi
-		#~ done
 		LIFACES=$(ifaces_get_links)
 		if [ ! -z "$LIFACES" ]; then
 			break
 		fi
 		# No link...try to wait a bit for the network to be established..
-		[ $VERBOSE -gt 0 ] && error_echo "No link detected on any network interface...waiting 10 seconds to try again.."
+		error_echo "$(iso_date) ${SCRIPT}: No link detected on any network interface...waiting 10 seconds to try again.."
 		sleep 10
 	done
 
 	if [ ! -z "$LIFACES" ]; then
-		echo "$LIFACES"
+		error_echo "$(iso_date) ${SCRIPT}: ${LIFACES} has a network link."
 		return 0
 	fi
 
 	# Give up..
-	error_echo "No link found on any network device.."
+	error_echo "$(iso_date) ${SCRIPT}: No link found on any network device. Exiting."
 	return 1
 
-}
-
-
-trim(){
-	local LVALUE="$1"
-	LVALUE="${LVALUE##*( )}"
-	LVALUE="${LVALUE%%*( )}"
-	
-	echo $LVALUE
-	
-}
-
-firewall_subnet_check(){
-	local FW_SUBNETS="$(sudo ufw status | grep ALLOW | awk '{print $3}' | sort | uniq | xargs)"
-	local FW_SUBNET=
-	local LIFACE="$(iface_primary_getb)"
-	local IP_SUBNET="$(iface_subnet_get "$LIFACE")"
-	
-	[ $VERBOSE -gt 0 ] && error_echo "${SCRIPT}: Checking firewall subnet against ${LIFACE} ${IP_SUBNET}.."
-
-	# If there's no IP or link, don't attempt to change the firewall..
-	if [ -z "$IP_SUBNET" ]; then
-		LIFACE="$(iface_primary_get)"
-		iface_has_link "$LIFACE"
-		if [ $? -gt 0 ]; then
-			# if there is no link (e.g. ethernet not plugged in) give up immediatly without changing anything..
-			[ $VERBOSE -gt 0 ] && error_echo "Iface ${LIFACE} has no ip or link."
-			exit 0
-		fi
-	fi
-	
-	# Check to see if we have dhcp..
-	for n in 1 2 3
-	do
-		if [ "$IP_SUBNET" = "127.0.0.0/8" ]; then
-			[ $VERBOSE -gt 0 ] && error_echo "Waiting 3 seconds for dhcp.."
-			sleep 3
-			IP_SUBNET="$(ipaddr_subnet_get)"
-		else
-			break
-		fi
-	done
-	
-	for FW_SUBNET in $FW_SUBNETS
-	do
-		if [ "$FW_SUBNET" = "$IP_SUBNET" ]; then
-			[ $VERBOSE -gt 0 ] && error_echo "Iface ${LIFACE} Subnet: '${IP_SUBNET}' matches firewall subnet: '${FW_SUBNET}'"
-			return 0
-		fi
-	done
-	
-
-	[ $VERBOSE -gt 0 ] && error_echo "Iface ${LIFACE} Subnet: '${IP_SUBNET}' does not match firewall subnet: '${FW_SUBNET}'"
-	[ $VERBOSE -gt 0 ] && error_echo "Reconfiguring firewall.."
-
-	if [ $MINIMAL -gt 0 ]; then
-		[ $TEST -lt 1 ] && config-firewall.sh --minimal
-	else
-		[ $TEST -lt 1 ] && config-firewall.sh
-	fi
-	
 }
 
 
@@ -176,6 +110,6 @@ while [ $# -gt 0 ]; do
 done
 
 
-firewall_subnet_check
+get_links_wait
 
-exit 0
+exit $?
