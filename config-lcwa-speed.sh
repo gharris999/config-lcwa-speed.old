@@ -4,7 +4,7 @@
 # Bash script for installing Andi Klein's Python LCWA PPPoE Speedtest Logger 
 # as a service on systemd, upstart & sysv systems
 ######################################################################################################
-SCRIPT_VERSION=20200715.170237
+SCRIPT_VERSION=20201206.204051
 REQINCSCRIPTVER=20200422
 
 INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
@@ -242,6 +242,7 @@ env_vars_name(){
 "LCWA_MEMLOCK" \
 "LCWA_CLEARLOG" \
 "LCWA_DEBUG_SCRIPT" \
+"LCWA_PPPCHK_SCRIPT" \
 "LCWA_UPDATE_SCRIPT" \
 "PYTHONPATH" \
 "HOME"
@@ -258,7 +259,7 @@ env_vars_defaults_get(){
 	[ -z "$LCWA_PRODUCT" ] 			&& LCWA_PRODUCT="$(echo "$INST_NAME" |  tr [a-z] [A-Z])"
 	[ -z "$LCWA_DESC" ] 			&& LCWA_DESC="${LCWA_PRODUCT}-TEST Logger"
 	[ -z "$LCWA_PRODUCTID" ] 		&& LCWA_PRODUCTID="f1a4af09-977c-458a-b3f7-f530fb9029c1"
-	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20200715.170237
+	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20201206.204051
 	
 	[ -z "$LCWA_USER" ] 			&& LCWA_USER="$INST_USER"
 	[ -z "$LCWA_GROUP" ] 			&& LCWA_GROUP="$INST_GROUP"
@@ -1119,26 +1120,24 @@ script_debug_remove(){
 }
 
 ######################################################################################################
-# lcwa_update_script_create() Create the git/svn update script..
+# script_update_install() Install the git/svn update and other utility scripts..
 ######################################################################################################
 script_update_install(){
 	local LLOCAL_UPDATE_SCRIPT="/usr/local/sbin/${INST_NAME}-update.sh"
+	local LSCRIPT_FILE=
 	
-	# Copy
-	if [ -f "$LCWA_UPDATE_SCRIPT" ]; then
-		cp -pf "${LCWA_LOCALSUPREPO}/instsrv_functions.sh" /usr/local/sbin
-		cp -pf "${LCWA_LOCALSUPREPO}/scripts/chkfw.sh" /usr/local/sbin
-		chmod 755 /usr/local/sbin/chkfw.sh
-		cp -pf "$LCWA_UPDATE_SCRIPT" "$LLOCAL_UPDATE_SCRIPT"
-		chmod 755 "$LLOCAL_UPDATE_SCRIPT"
-		touch "--reference=${LCWA_UPDATE_SCRIPT}" "$LLOCAL_UPDATE_SCRIPT"
-	elif [ -f "${SCRIPT_DIR}/scripts/${INST_NAME}-update.sh" ]; then
-		cp -pf "${SCRIPT_DIR}/instsrv_functions.sh" /usr/local/sbin
-		cp -pf "${SCRIPT_DIR}/scripts/chkfw.sh" /usr/local/sbin
-		chmod 755 /usr/local/sbin/chkfw.sh
-		cp -pf "${SCRIPT_DIR}/scripts/${INST_NAME}-update.sh" "$LLOCAL_UPDATE_SCRIPT"
-		chmod 755 "$LLOCAL_UPDATE_SCRIPT"
-		touch "--reference=${SCRIPT_DIR}/scripts/${INST_NAME}-update.sh" "$LLOCAL_UPDATE_SCRIPT"
+	# Are we running from a repo?
+	if [ -d "${SCRIPT_DIR}/scripts" ]; then
+	
+		cp -pf "${SCRIPT_DIR}/instsrv_functions.sh" "/usr/local/sbin/instsrv_functions.sh"
+		
+		for LSCRIPT_FILE in $(ls -1 "${SCRIPT_DIR}/scripts" )
+		do	
+			error_echo "Installing ${LSCRIPT_FILE} to /usr/local/sbin"
+			cp -pf "${SCRIPT_DIR}/scripts/${LSCRIPT_FILE}" "/usr/local/sbin/${LSCRIPT_FILE}"
+			chmod 755 "/usr/local/sbin/${LSCRIPT_FILE}"
+		done
+		
 	fi
 
 	if [ ! -f "$LLOCAL_UPDATE_SCRIPT" ]; then
@@ -1151,7 +1150,7 @@ script_update_install(){
 }
 
 ######################################################################################################
-# lcwa_update_script_remove() Remove the git/svn update script..
+# script_update_remove() Remove the git/svn update script..
 ######################################################################################################
 script_update_remove(){
 	local LLOCAL_UPDATE_SCRIPT="/usr/local/sbin/${INST_NAME}-update.sh"
@@ -1168,11 +1167,14 @@ crontab_entry_add(){
 	#~ local EVENT='5 0 * * * /usr/local/share/config-lcwa-speed/scripts/lcwa-speed-update.sh --debug --force --sbin-update'
 	#~ local EVENT='5 0 * * * /usr/local/share/config-lcwa-speed/scripts/lcwa-speed-update.sh --debug | /usr/bin/logger -t lcwa-speed'
 	local ROOTCRONTAB='/var/spool/cron/crontabs/root'
+	local PPPOE_ACCOUNT=
 	
 	[ $IS_FEDORA -gt 0 ] && ROOTCRONTAB='/var/spool/cron/root'
 	
 	[ ! -f "$ROOTCRONTAB" ] && touch "$ROOTCRONTAB"
 	
+	# Setup crontab entry for our update script..
+
 	# Remove any old reference to lcwa-speed-update.sh
 	sed -i "/^#.*${INST_NAME}.*$/d" "$ROOTCRONTAB"
 	sed -i "/^.*${INST_NAME}-update.*$/d" "$ROOTCRONTAB"
@@ -1180,6 +1182,26 @@ crontab_entry_add(){
 	error_echo "Adding ${EVENT} to ${ROOTCRONTAB}"
 	echo "$COMMENT" >>"$ROOTCRONTAB"
 	echo "$EVENT" >>"$ROOTCRONTAB"
+	
+	# Add a PPPoE connection check to the crontab if a PPPoE interface is defined..
+	if [ -e '/etc/network/interfaces' ]; then
+		PPPOE_ACCOUNT="$(grep -E '^auto.*lcwa.*$' /etc/network/interfaces | awk '{ print $2 }')"
+		if [ ! -z "$PPPOE_ACCOUNT" ]; then
+			COMMENT="#At every 10th minute, check the ${PPPOE_ACCOUNT} PPPoE connecton and reestablish it if down."
+			EVENT="*/10 * * * * /usr/local/sbin/chkppp.sh | /usr/bin/logger -t ${LCWA_SERVICE}"
+
+			# Remove any old reference to chkppp.sh
+			sed -i "/^#.*${PPPOE_ACCOUNT}.*$/d" "$ROOTCRONTAB"
+			sed -i "/^.*chkppp\.sh.*$/d" "$ROOTCRONTAB"
+
+			error_echo "Adding ${EVENT} to ${ROOTCRONTAB}"
+			echo "$COMMENT" >>"$ROOTCRONTAB"
+			echo "$EVENT" >>"$ROOTCRONTAB"
+			
+		fi
+	fi
+	
+	
 	
 	# Make sure the permissions are correct for root crontab! (i.e. must not be 644!)
 	chmod 600 "$ROOTCRONTAB"
@@ -1207,6 +1229,12 @@ crontab_entry_remove(){
 	# Remove any old reference to lcwa-speed-update.sh
 	sed -i "/^#.*${INST_NAME}.*$/d" "$ROOTCRONTAB"
 	sed -i "/^.*${INST_NAME}-update.*$/d" "$ROOTCRONTAB"
+	
+	EVENT="*/10 * * * * /usr/local/sbin/chkppp.sh | /usr/bin/logger -t ${LCWA_SERVICE}"
+	error_echo "Removing ${EVENT} from ${ROOTCRONTAB}"
+	# Remove any old reference to chkppp.sh
+	sed -i "/^#.*${PPPOE_ACCOUNT}.*$/d" "$ROOTCRONTAB"
+	sed -i "/^.*chkppp\.sh.*$/d" "$ROOTCRONTAB"
 	
 	# signal crond to reload the file
 	sudo touch /var/spool/cron/crontabs	
@@ -1423,9 +1451,7 @@ chmod 1777 /tmp
 #
 ########################################################################################
 
-/usr/local/sbin/chkfw.sh --verbose --minimal
-
-exit 0
+/usr/local/sbin/chkfw.sh --verbose --minimal --public
 
 exit 0
 CONF1
@@ -2046,8 +2072,7 @@ elif [ $UPDATE -gt 0 ]; then
 	env_vars_defaults_get
 
 	if [ $FORCE -lt 1 ]; then
-		service_is_installed
-		if [ $? -lt 1 ]; then
+		if ( ! service_is_installed "$INST_NAME" ); then
 			error_exit "${INST_NAME} is not installed.  Cannot update ${INST_NAME}.."
 		fi
 	fi
@@ -2122,9 +2147,7 @@ elif [ $UNINSTALL -gt 0 ]; then
 	fi
 
 	if [ $FORCE -lt 1 ]; then
-		service_is_installed
-
-		if [ $? -lt 1 ]; then
+		if ( ! service_is_installed "$INST_NAME" ); then
 			error_exit "${INST_NAME} is not installed.  Cannot remove ${INST_NAME}.."
 		fi
 	else

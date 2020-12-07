@@ -2,7 +2,7 @@
 # lcwa-speed-update.sh -- script to update lcwa-speed git repo and restart service..
 # Version Control for this script
 
-SCRIPT_VERSION=20200715.170237
+SCRIPT_VERSION=20201206.144308
 
 INST_NAME='lcwa-speed'
 
@@ -463,7 +463,6 @@ git_check_up_to_date "$LCWA_LOCALSUPREPO"
 # See if we need to update the service installation
 script_update_check "$LCWA_LOCALSUPREPO"
 
-
 # See if we need to update this update script..
 if [ $SERVICES_UPDATE -gt 0 ]; then
 	services_zip_update
@@ -478,8 +477,6 @@ if [ $OS_UPDATE -gt 0 ]; then
 	[ $TEST_ONLY -lt 1 ] && apt-get update
 	[ $TEST_ONLY -lt 1 ] && apt-get -y upgrade
 fi
-
-
 
 if [ $REBOOT -gt 0 ]; then
 	log_msg "${SCRIPT} requries a reboot of this system!"

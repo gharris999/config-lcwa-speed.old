@@ -1,9 +1,11 @@
 #!/bin/bash
 
+SCRIPT_VERSION=20201206.201152
+
 # Script to check network status on boot.  Called from rc.local
 #
 #
- 
+
 INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
 [ ! -f "$INCLUDE_FILE" ] && INCLUDE_FILE='/usr/local/sbin/instsrv_functions.sh'
 
@@ -13,8 +15,11 @@ SCRIPT="$(basename "$(readlink -f "$0")")"
 
 DEBUG=0
 VERBOSE=0
+FORCE=0
 TEST=0
 MINIMAL=0
+PUBLIC=0
+CONFIG_FIREWALL_OPTS=
 
 ########################################################################################
 # get_links_wait( $NETDEV) Tests to see if an interface is linked. returns 0 == linked; 1 == no link;
@@ -63,9 +68,9 @@ trim(){
 	local LVALUE="$1"
 	LVALUE="${LVALUE##*( )}"
 	LVALUE="${LVALUE%%*( )}"
-	
+
 	echo $LVALUE
-	
+
 }
 
 firewall_subnet_check(){
@@ -73,7 +78,7 @@ firewall_subnet_check(){
 	local FW_SUBNET=
 	local LIFACE="$(iface_primary_getb)"
 	local IP_SUBNET="$(iface_subnet_get "$LIFACE")"
-	
+
 	[ $VERBOSE -gt 0 ] && error_echo "${SCRIPT}: Checking firewall subnet against ${LIFACE} ${IP_SUBNET}.."
 
 	# If there's no IP or link, don't attempt to change the firewall..
@@ -86,7 +91,7 @@ firewall_subnet_check(){
 			exit 0
 		fi
 	fi
-	
+
 	# Check to see if we have dhcp..
 	for n in 1 2 3
 	do
@@ -98,25 +103,21 @@ firewall_subnet_check(){
 			break
 		fi
 	done
-	
+
 	for FW_SUBNET in $FW_SUBNETS
 	do
-		if [ "$FW_SUBNET" = "$IP_SUBNET" ]; then
+		if [ "$FW_SUBNET" = "$IP_SUBNET" ] || [ "$FW_SUBNET" = 'Anywhere' ]; then
 			[ $VERBOSE -gt 0 ] && error_echo "Iface ${LIFACE} Subnet: '${IP_SUBNET}' matches firewall subnet: '${FW_SUBNET}'"
 			return 0
 		fi
 	done
-	
+
 
 	[ $VERBOSE -gt 0 ] && error_echo "Iface ${LIFACE} Subnet: '${IP_SUBNET}' does not match firewall subnet: '${FW_SUBNET}'"
 	[ $VERBOSE -gt 0 ] && error_echo "Reconfiguring firewall.."
 
-	if [ $MINIMAL -gt 0 ]; then
-		[ $TEST -lt 1 ] && config-firewall.sh --minimal
-	else
-		[ $TEST -lt 1 ] && config-firewall.sh
-	fi
-	
+	[ $TEST -lt 1 ] || [ $FORCE -gt 0 ] && config-firewall.sh $CONFIG_FIREWALL_OPTS
+
 }
 
 
@@ -132,8 +133,8 @@ firewall_subnet_check(){
 # Get cmd line args..
 
 # Process cmd line args..
-SHORTARGS='hdvqmt'
-LONGARGS='help,debug,verbose,quiet,minimal,test,notest'
+SHORTARGS='hdvqmpt'
+LONGARGS='help,debug,verbose,quiet,force,minimal,public,test,notest'
 ARGS=$(getopt -o "$SHORTARGS" -l "$LONGARGS"  -n "$(basename $0)" -- "$@")
 
 eval set -- "$ARGS"
@@ -143,23 +144,34 @@ while [ $# -gt 0 ]; do
 		--)
 			;;
 		-h|--help)
-			echo "Syntax: $(basename "$0") [--debug] [--test] [--verbose] [--quiet]"
+			disp_help
+			#echo "Syntax: $(basename "$0") [--debug] [--test] [--verbose] [--quiet] [--minimal]"
 			exit 0
 			;;
 		-d|--debug)
 			DEBUG=1
-			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --debug"
+			CONFIG_FIREWALL_OPTS="${CONFIG_FIREWALL_OPTS} --debug"
 			;;
 		-v|--verbose)
+			CONFIG_FIREWALL_OPTS="${CONFIG_FIREWALL_OPTS} --verbose"
 			VERBOSE=1
 			;;
 		-q|--quiet)
 			VERBOSE=0
 			;;
+		--force)
+			FORCE=1
+			;;
 		-m|--minimal)
 			MINIMAL=1
+			CONFIG_FIREWALL_OPTS="${CONFIG_FIREWALL_OPTS} --minimal"
+			;;
+		-p|--public)
+			PUBLIC=1
+			CONFIG_FIREWALL_OPTS="${CONFIG_FIREWALL_OPTS} --public"
 			;;
 		-t|--test)
+			CONFIG_FIREWALL_OPTS="${CONFIG_FIREWALL_OPTS} --test"
 			TEST=1
 			;;
 		--notest)

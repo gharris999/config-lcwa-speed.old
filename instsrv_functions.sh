@@ -2,9 +2,9 @@
 
 ######################################################################################################
 # Bash include script for generically installing services on upstart, systemd & sysv systems
-# 20190312 -- Gordon Harris
+# 20200721 -- Gordon Harris
 ######################################################################################################
-INCSCRIPTVER=20200608
+INCSCRIPTVER=20200721
 SCRIPTNAME=$(basename "$0")
 
 # Get the underlying user...i.e. who called sudo..
@@ -17,6 +17,7 @@ NOPROMPT=0
 QUIET=0
 VERBOSE=0
 DEBUG=0
+TEST=0
 UPDATE=0
 UNINSTALL=0
 REMOVEALL=0
@@ -532,10 +533,16 @@ log_dir_remove(){
 log_rotate_script_create(){
 
 	local LLOG_FILE="$1"
+	local LLOG_ROTATE_COUNT="$2"
 
 	if [ -z "$LLOG_FILE" ]; then
 		LLOG_FILE="/var/log/${INST_NAME}/${INST_NAME}.log"
 	fi
+	
+	if [ -z "$LLOG_ROTATE_COUNT" ]; then
+		LLOG_ROTATE_COUNT='5'
+	fi
+	
 
 	local LBASENAME="$(basename "$LLOG_FILE")"
 	LBASENAME="${LBASENAME%%.*}"
@@ -550,15 +557,16 @@ log_rotate_script_create(){
 
 	error_echo "Creating log rotate script ${LOG_ROTATE_SCRIPT}."
 
-	cat >"$LOG_ROTATE_SCRIPT" <<LOGROTATESCR;
+	cat >>"$LOG_ROTATE_SCRIPT" <<LOGROTATESCR;
 ${LLOG_FILE} {
     missingok
     weekly
     notifempty
     compress
-    rotate 5
+    rotate ${LLOG_ROTATE_COUNT}
     size 20k
 }
+
 LOGROTATESCR
 
 }
@@ -802,37 +810,60 @@ env_file_remove(){
 
 ######################################################################################################
 # service_is_installed() Check to see that the service is installed.  
-#   Returns 1 if installed (i.e. opposite of is_service()
+#   Returns 0 if installed (i.e. opposite of is_service()
 ######################################################################################################
 service_is_installed(){
+	local LSERVICE="$1"
+	local LINST_ENVFILE=
+	local LINIT_SCRIPT=
+	
+	[ -z "$LSERVICE" ] && LSERVICE="$INST_NAME"
 
 	if [ $IS_DEBIAN -gt 0 ]; then
-		INST_ENVFILE="/etc/default/${INST_NAME}"
+		LINST_ENVFILE="/etc/default/${LSERVICE}"
 	else
-		INST_ENVFILE="/etc/sysconfig/${INST_NAME}"
+		LINST_ENVFILE="/etc/sysconfig/${LSERVICE}"
 	fi
 
 	if [ $USE_UPSTART -gt 0 ]; then
-		INIT_SCRIPT="/etc/init/${INST_NAME}.conf"
+		LINIT_SCRIPT="/etc/init/${LSERVICE}.conf"
 	elif [ $USE_SYSTEMD -gt 0 ]; then
-		INIT_SCRIPT="/lib/systemd/system/${INST_NAME}.service"
+		LINIT_SCRIPT="/lib/systemd/system/${LSERVICE}.service"
 	else
 		if [ $IS_DEBIAN -gt 0 ]; then
-			INIT_SCRIPT="/etc/init.d/${INST_NAME}"
+			LINIT_SCRIPT="/etc/init.d/${LSERVICE}"
 		else
-			INIT_SCRIPT="/etc/rc.d/init.d/${INST_NAME}"
+			LINIT_SCRIPT="/etc/rc.d/init.d/${LSERVICE}"
 		fi
 	fi
 
-	if [ ! -f "$INST_ENVFILE" ]; then
-		return 0
+	if [ ! -f "$LINST_ENVFILE" ]; then
+		return 1
 	fi
 
-	if [ ! -f "$INIT_SCRIPT" ]; then
-		return 0
+	if [ ! -f "$LINIT_SCRIPT" ]; then
+		return 1
 	fi
 
-	return 1
+	return 0
+}
+
+
+######################################################################################################
+# service_is_enabled() Check to see that the service is installed and enabled.  
+#   Returns 0 if enabled, 1 if not
+######################################################################################################
+service_is_enabled(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LSERVICE="$1"
+	
+	if [ $USE_SYSTEMD -lt 1 ]; then
+		service_is_installed "$LSERVICE"
+		return $?
+	fi
+
+	( systemctl is-enabled --quiet "$LSERVICE" 2>/dev/null ) && return 0 || return 1
+
 }
 
 ######################################################################################################
@@ -925,23 +956,41 @@ ifaces_get_links(){
 }
 
 ########################################################################################
-# iface_validate( $NETDEV) Validates an interface name. returns 0 == valid; 1 == invalid
+# iface_is_valid( $NETDEV) Validates an interface name. returns 0 == valid; 1 == invalid
 ########################################################################################
-iface_validate(){
+iface_is_valid(){
 	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
 	local LIFACE="$1"
 
-	if [ -z "$LIFACE" ]; then
-		return 1
-	fi
+	[ -z "$LIFACE" ] && return 1
 
 	#~ if [ $(ls -1 '/sys/class/net' | grep -c -E "^${LIFACE}\$") -gt 0 ]; then
-	if [ -e "/sys/class/net/${LIFACE}" ]; then
-		return 0
-	fi
+	[ -e "/sys/class/net/${LIFACE}" ] && return 0
 
 	[ $VERBOSE -gt 0 ] && error_echo "Error: ${LIFACE} is not a valid network interface."
 	return 1
+}
+
+########################################################################################
+# iface_is_dhcp( $NETDEV) returns 0 == dhcp assigned address; 1 == static address
+########################################################################################
+iface_is_dhcp(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LIFACE="$1"
+	
+	[ $(ip -4 addr show "${LIFACE}" | grep -c 'dynamic') -lt 1 ] && return 1 || return 0
+	
+}
+
+########################################################################################
+# iface_is_static( $NETDEV) returns 0 == static address; 1 == dhcp assigned address
+########################################################################################
+iface_is_static(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LIFACE="$1"
+	
+	[ $(ip -4 addr show "${LIFACE}" | grep -c 'dynamic') -lt 1 ] && return 0 || return 1
+	
 }
 
 echo_return(){
@@ -1368,6 +1417,22 @@ ipaddress_get(){
 
 }
 
+ipaddr_is_valid(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}($@)"
+	# Set up local variables
+	local ip="$1"
+	[ -z "$ip" ] && return 1
+	local IFS=.; local -a a=($ip)
+	# Start with a regex format test
+	[[ $ip =~ ^[0-9]+(\.[0-9]+){3}$ ]] || return 1
+	# Test values of quads
+	local quad
+	for quad in {0..3}; do
+		[[ "${a[$quad]}" -gt 255 ]] && return 1
+	done
+	return 0
+}
+
 ipaddr_get(){
 	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME} $@"
 	# FLAW: ip cmd only returns an ipv4 addr if there is a link..
@@ -1625,28 +1690,967 @@ ipaddress_iface_get(){
 # Firewall related functions...
 ######################################################################################################
 
-firewall_open_port(){
+######################################################################################################
+# firewall_service_exists ( service_name ) Checks for existance of a named port definition in
+#   /etc/services.  returns 0 == service exists || 1 == service does not exist.
+######################################################################################################
+firewall_service_exists() {
 	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
-	local LPROTOCOL="$1"
-	local LPORT="$2"
-	local LIFACE=
-
-	for LIFACE in $(ifaces_get)
-	do
-		iface_firewall_open_port "$LIFACE" "$LPROTOCOL" "$LPORT"
-	done
+	local LSERVICE="$1"
+	local LCONF_FILE='/etc/services'
+	[ -z "$LSERVICE" ] && return 1
+	#~ grep -E "^${LSERVICE}\s+[[:digit:]]+\/[tcudp]+.*" "$LCONF_FILE"
+	[ $(grep -c -E "^${LSERVICE}\s+[[:digit:]]+\/[[:alpha:]]+.*" "$LCONF_FILE") -gt 0 ] && return 0 || return 1
 }
 
-firewall_close_port(){
+######################################################################################################
+# firewall_service_open ( service_name, iface|ipaddr|null_for_public )
+#		 -- opens a /etc/services defined /etc/services service.
+######################################################################################################
+firewall_service_open() {
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LSERVICE="$1"
+	local LPARAMS="$2"
+	local LPARAM=
+
+	# Check to see if the service is in /etc/services
+	if ( ! firewall_service_exists "$LSERVICE" ); then
+		error_echo "Error: service ${LSERVICE} is undefined."
+		return 1
+	fi
+	
+	if [ -z "$LPARAMS" ]; then
+		# Open publically..
+		if [ $USE_FIREWALLD -gt 0 ]; then
+			LFWZONE='public'
+			firewall-cmd --permanent --zone=${LFWZONE} --add-service=${LSERVICE} >/dev/null && error_echo "Opening ${LFWZONE} for service ${LSERVICE}"
+			firewall-cmd --reload
+		else
+			ufw allow "$LSERVICE" >/dev/null && error_echo "Opening Anywhere for service ${LSERVICE}"
+		fi
+		return $?
+	else
+		# LPARAMS can be an array of ip addresses or interface devices..
+		for LPARAM in $LPARAMS
+		do
+			if ( ipaddr_is_valid "$LPARAM" ); then
+				[ $USE_FIREWALLD -gt 0 ] && LFWZONE="$(ipaddr_firewall_zone_get "$LPARAM")" || LSUBNET="$(ipaddr_subnet_get "$LPARAM")"
+			elif (iface_is_valid "$LPARAM" ); then
+				[ $USE_FIREWALLD -gt 0 ] && LFWZONE="$(iface_firewall_zone_get "$LPARAM")" || LSUBNET="$(iface_subnet_get "$LPARAM")"
+			else
+				error_echo "Error: ${LPARAM} is neither an ipaddr or iface."
+				continue
+			fi
+			
+			if [ $USE_FIREWALLD -gt 0 ]; then
+				[ ! -z "$LFWZONE" ] && firewall-cmd "--permanent" "--zone=${LFWZONE}" "--add-service=${LSERVICE}" >/dev/null && error_echo "Opening ${LFWZONE} for service ${LSERVICE}.."
+			else
+				[ ! -z "$LSUBNET" ] && ufw allow from "$LSUBNET" to any port "$LSERVICE" >/dev/null && error_echo "Opening ${LSUBNET} for service ${LSERVICE}.."
+			fi
+		done
+	fi
+
+	return 0
+}
+
+firewall_service_close() {
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LSERVICE="$1"
+	local LPARAMS="$2"
+	local LPARAM=
+
+	# Check to see if the service is in /etc/services
+	if ( ! firewall_service_exists "$LSERVICE" ); then
+		error_echo "Error: service ${LSERVICE} is undefined."
+		return 1
+	fi
+	
+	if [ -z "$LPARAMS" ]; then
+		# Open publically..
+		if [ $USE_FIREWALLD -gt 0 ]; then
+			LFWZONE='public'
+			firewall-cmd --permanent --zone=${LFWZONE} --remove-service=${LSERVICE} >/dev/null && error_echo "Closing ${LFWZONE} for service ${LSERVICE}"
+			firewall-cmd --reload
+		else
+			ufw delete allow "$LSERVICE" >/dev/null && error_echo "Closing Anywhere for service ${LSERVICE}"
+		fi
+		return $?
+	else
+		# LPARAMS can be an array of ip addresses or interface devices..
+		for LPARAM in $LPARAMS
+		do
+			if ( ipaddr_is_valid "$LPARAM" ); then
+				[ $USE_FIREWALLD -gt 0 ] && LFWZONE="$(ipaddr_firewall_zone_get "$LPARAM")" || LSUBNET="$(ipaddr_subnet_get "$LPARAM")"
+			elif (iface_is_valid "$LPARAM" ); then
+				[ $USE_FIREWALLD -gt 0 ] && LFWZONE="$(iface_firewall_zone_get "$LPARAM")" || LSUBNET="$(iface_subnet_get "$LPARAM")"
+			else
+				error_echo "Error: ${LPARAM} is neither an ipaddr or iface."
+				continue
+			fi
+			
+			if [ $USE_FIREWALLD -gt 0 ]; then
+				[ ! -z "$LFWZONE" ] && firewall-cmd "--permanent" "--zone=${LFWZONE}" "--remove-service=${LSERVICE}" >/dev/null && error_echo "Closing ${LFWZONE} for service ${LSERVICE}.."
+			else
+				[ ! -z "$LSUBNET" ] && ufw delete allow from "$LSUBNET" to any port "$LSERVICE" >/dev/null && error_echo "Closing ${LSUBNET} for service ${LSERVICE}.."
+			fi
+		done
+	fi
+
+	return 0
+}
+
+######################################################################################################
+# firewall_app_exists ( app_name ) Returns 0 if a defined app exists..
+######################################################################################################
+firewall_app_exists(){
+	local LAPP_NAME="$1"
+	if [ $USE_FIREWALLD -gt 0 ]; then
+		[ $(firewall-cmd --get-services | xargs -n 1 | grep -c -E "^${LAPP_NAME}\$") -gt 0 ] && return 0 || return 1
+	else
+		[ $(ufw app list | grep -E '^\s+' | xargs | xargs -n 1 | grep -c -E "^${LAPP_NAME}\$") -gt 0 ] && return 0 || return 1
+	fi
+}
+
+
+######################################################################################################
+# firewall_create_app ( app_name "appfile_contents") Creates and registers the application / service
+#	file for ufw or firewalld.
+######################################################################################################
+firewall_app_create(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LAPP_NAME="$1"
+	local LAPP="$2"
+	local LPUBLIC=${3:-0}
+	local LCONF_DIR=
+	local LCONF_FILE=
+	
+	# Check to see if the APP is already open
+	
+	
+	if [ -z "$LAPP" ]; then
+		error_echo "Error: no app file passed."
+	fi
+	
+	if [ $USE_FIREWALLD -gt 0 ]; then
+		LCONF_DIR='/etc/firewalld/services'
+		if [ ! -d "$LCONF_DIR" ]; then
+			error_echo "Error: ${LCONF_DIR} not found."
+			return 1
+		fi
+		LCONF_FILE="${LCONF_DIR}/${LAPP_NAME}.xml"
+
+		# Only backup service.xml files..
+		if [ -f "$LCONF_FILE" ]; then
+			if [ ! -f "${LCONF_FILE}.org" ]; then
+				cp -p "$LCONF_FILE" "${LCONF_FILE}.org"
+			fi
+			cp -p "$LCONF_FILE" "${LCONF_FILE}.bak"
+		fi
+
+	else
+	
+		LCONF_DIR='/etc/ufw/applications.d'
+		if [ ! -d "$LCONF_DIR" ]; then
+			error_echo "Error: ${LCONF_DIR} not found."
+			return 1
+		fi
+		
+		# Check for $LAPP_NAME in /etc/services. Rename our app to avoid collision..
+		#~ if [ $(grep -c -E "^${LAPP_NAME}\s+" /etc/services) -gt 0 ]; then
+			#~ LAPP_NAME="my-${LAPP_NAME}"
+		#~ fi
+		
+		if ( firewall_service_exists "$LAPP_NAME" ); then
+			LAPP_NAME="my-${LAPP_NAME}"
+		fi
+		
+		LCONF_FILE="${LCONF_DIR}/${LAPP_NAME}"
+		
+	fi
+	
+	##############################################################################################
+	##############################################################################################
+	##############################################################################################
+	##############################################################################################
+	# For UFW, check for existence of ^${LAPP_NAME}\s+ in /etc/services
+	#   If there is one, rename our LAPP_NAME to "my-${LAPP_NAME}" and fixup the [${LAPP_NAME}]
+	#   in the file.
+	##############################################################################################
+	##############################################################################################
+	##############################################################################################
+	
+	error_echo "Creating firewall application file ${LCONF_FILE}.."
+	
+	echo "$LAPP" >"$LCONF_FILE"
+	chown root:root "$LCONF_FILE"
+	chmod 0644 "$LCONF_FILE"
+
+	if [ $USE_UFW -gt 0 ]; then
+		# Fix up entries in the app file if we've prefixed 'my-' to avoid
+		# collisions with an entry in /etc/services..
+		if [ $(echo $LAPP_NAME | grep -c -E '^my-.*$') -gt 0 ]; then
+			if [ $(grep -c -E "^\[${LAPP_NAME#my-}\]" "$LCONF_FILE") -gt 0 ]; then
+				
+				sed -i -e "s#^\[${LAPP_NAME#my-}\]#\[${LAPP_NAME}\]#" "$LCONF_FILE"
+				
+				sed -i -e "s#^title=${LAPP_NAME#my-}#title=${LAPP_NAME}#" "$LCONF_FILE"
+			fi
+		fi
+	fi
+	
+
+	if [ $DEBUG -gt 0 ]; then
+		error_echo "#########################################################################"
+		cat "$LCONF_FILE"
+		error_echo "#########################################################################"
+	fi
+	
+	if [ $USE_FIREWALLD -gt 0 ]; then
+		firewall-cmd --reload
+		
+		if [ $(firewall-cmd --get-services | xargs -n 1 | grep -c -E "^${LAPP_NAME}\$") -lt 1 ]; then
+			error_echo "Error: ${LAPP_NAME} was not registered as a service."
+			return 1
+		fi
+	else
+		ufw app update "$LAPP_NAME"
+		ufw app info "$LAPP_NAME"
+		
+		if [ $(ufw app list | grep -c -E "^\s+${LAPP_NAME}$") -lt 1 ]; then
+			error_echo "Error: ${LAPP_NAME} was not registered as a service."
+			return 1
+		fi
+		
+	fi
+}
+
+######################################################################################################
+# firewall_app_file_check ( app_name ) Checks for existance of app-service port definition file.
+#	returns 0 == file exists || 1 == file does not exist.
+######################################################################################################
+firewall_app_file_check(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LAPP_NAME="$1"
+	local LCONF_FILE=
+	if [ $USE_FIREWALLD -gt 0 ]; then
+		LCONF_FILE="/lib/firewalld/services/${LAPP_NAME}.xml"
+	else
+		LCONF_FILE="/etc/ufw/applications.d/${LAPP_NAME}"
+	fi
+
+	# App file not installed, so by definition, the app's port(s) has/have not been opened.
+	[ -f "$LCONF_FILE" ] && return 0 || return 1
+	
+}
+
+########################################################################################
+# firewall_app_open( app_name, ifaces || ipaddrs || null_for_public)
+#		Opens a defined ufw app profile or firewalld service.xml 
+########################################################################################
+firewall_app_open(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LAPP_NAME="$1"
+	local LPARAMS="$2"
+	local LPARAM=
+	local LFWZONE=
+	
+	# Avoid collision with pre-defined services in /etc/services if using ufw..
+	if [ $USE_UFW -gt 0 ]; then
+		if ( firewall_service_exists "$LAPP_NAME" ); then
+			LAPP_NAME="my-${LAPP_NAME}"
+		fi
+	fi
+
+	# ufw app update emits no error even if the app isn't defined or exists..
+	[ $USE_UFW -gt 0 ] && ufw app update "$LAPP_NAME" || firewall-cmd --reload
+	
+	# Check to see if the app defined & registered..
+	if ( ! firewall_app_exists "$LAPP_NAME" ); then
+		error_echo "Error: application ${LAPP_NAME} is undefined."
+		return 1
+	fi
+	
+	if [ -z "$LPARAMS" ]; then
+		# Open publically..
+		if [ $USE_FIREWALLD -gt 0 ]; then
+			LFWZONE='public'
+			firewall-cmd --permanent --zone=${LFWZONE} --add-service=${LAPP_NAME} >/dev/null && echo "Opening ${LFWZONE} for application ${LAPP_NAME}"
+			firewall-cmd --reload
+		else
+			ufw allow "$LAPP_NAME"  >/dev/null && echo "Opening Anywhere for application ${LAPP_NAME}"
+		fi
+		return $?
+	else
+		# LPARAMS can be an array of ip addresses or interface devices..
+		for LPARAM in $LPARAMS
+		do
+			if ( ipaddr_is_valid "$LPARAM" ); then
+				[ $USE_FIREWALLD -gt 0 ] && LFWZONE="$(ipaddr_firewall_zone_get "$LPARAM")" || LSUBNET="$(ipaddr_subnet_get "$LPARAM")"
+			elif (iface_is_valid "$LPARAM" ); then
+				[ $USE_FIREWALLD -gt 0 ] && LFWZONE="$(iface_firewall_zone_get "$LPARAM")" || LSUBNET="$(iface_subnet_get "$LPARAM")"
+			else
+				error_echo "Error: ${LPARAM} is neither an ipaddr or iface."
+				continue
+			fi
+			
+			if [ $USE_FIREWALLD -gt 0 ]; then
+				[ ! -z "$LFWZONE" ] && firewall-cmd "--permanent" "--zone=${LFWZONE}" "--add-service=${LAPP_NAME}" && error_echo "Opening ${LFWZONE} for application ${LAPP_NAME}.."
+				firewall-cmd --reload
+			else
+				[ ! -z "$LSUBNET" ] && ufw allow from "$LSUBNET" to any app "$LAPP_NAME" >/dev/null && error_echo "Opening ${LSUBNET} for application ${LAPP_NAME}.."
+			fi
+		done
+	fi
+
+	return 0
+	
+}
+
+########################################################################################
+# firewall_app_close( app_name, ifaces || ipaddrs || null_for_public)
+#		Opens a defined ufw app profile or firewalld service.xml 
+########################################################################################
+firewall_app_close(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LAPP_NAME="$1"
+	local LPARAMS="$2"
+	local LPARAM=
+	local LFWZONE=
+	
+	# Avoid collision with pre-defined services in /etc/services if using ufw..
+	if [ $USE_UFW -gt 0 ]; then
+		if ( firewall_service_exists "$LAPP_NAME" ); then
+			LAPP_NAME="my-${LAPP_NAME}"
+		fi
+	fi
+
+	# ufw app update emits no error even if the app isn't defined or exists..
+	[ $USE_UFW -gt 0 ] && ufw app update "$LAPP_NAME" || firewall-cmd --reload
+	
+	# Check to see if the app defined & registered..
+	if ( ! firewall_app_exists "$LAPP_NAME" ); then
+		error_echo "Error: application ${LAPP_NAME} is undefined."
+		return 1
+	fi
+	
+	if [ -z "$LPARAMS" ]; then
+		# Open publically..
+		if [ $USE_FIREWALLD -gt 0 ]; then
+			LFWZONE='public'
+			firewall-cmd --permanent --zone=${LFWZONE} --remove-service=${LAPP_NAME} >/dev/null && error_echo "Closing ${LFWZONE} for application ${LAPP_NAME}"
+			firewall-cmd --reload
+		else
+			ufw delete allow "$LAPP_NAME" >/dev/null && error_echo "Closing Anywhere for application ${LAPP_NAME}"
+		fi
+		return $?
+	else
+		# LPARAMS can be an array of ip addresses or interface devices..
+		for LPARAM in $LPARAMS
+		do
+			if ( ipaddr_is_valid "$LPARAM" ); then
+				[ $USE_FIREWALLD -gt 0 ] && LFWZONE="$(ipaddr_firewall_zone_get "$LPARAM")" || LSUBNET="$(ipaddr_subnet_get "$LPARAM")"
+			elif (iface_is_valid "$LPARAM" ); then
+				[ $USE_FIREWALLD -gt 0 ] && LFWZONE="$(iface_firewall_zone_get "$LPARAM")" || LSUBNET="$(iface_subnet_get "$LPARAM")"
+			else
+				error_echo "Error: ${LPARAM} is neither an ipaddr or iface."
+				continue
+			fi
+			
+			if [ $USE_FIREWALLD -gt 0 ]; then
+				[ ! -z "$LFWZONE" ] && firewall-cmd "--permanent" "--zone=${LFWZONE}" "--remove-service=${LAPP_NAME}" >/dev/null && error_echo "Closing ${LFWZONE} for application ${LAPP_NAME}.."
+				firewall-cmd --reload
+			else
+				[ ! -z "$LSUBNET" ] && ufw delete allow from "$LSUBNET" to any app "$LAPP_NAME" >/dev/null && error_echo "Closing ${LSUBNET} for application ${LAPP_NAME}.."
+			fi
+		done
+	fi
+
+	return 0
+	
+}
+
+########################################################################################
+# firewall_app_close( app_name, ifaces || ipaddrs || null_for_public)
+#		Opens a defined ufw app profile or firewalld service.xml 
+########################################################################################
+firewall_app_close_all(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LAPP_NAME="$1"
+	local LRULE=
+	local LFWZONE=
+	local LSUBNET=
+	
+	[ -z "$LAPP_NAME" ] && return 1
+	
+	# Avoid collision with pre-defined services in /etc/services if using ufw..
+	if [ $USE_UFW -gt 0 ]; then
+		if ( firewall_service_exists "$LAPP_NAME" ); then
+			LAPP_NAME="my-${LAPP_NAME}"
+		fi
+	fi
+	
+	# UFW firewall rule can still exist after the app file has been removed..
+	#~ if ( ! firewall_app_exists "$LAPP_NAME" ); then
+		#~ error_echo "Error: application ${LAPP_NAME} is undefined."
+		#~ return 1
+	#~ fi
+	
+	if [ $USE_FIREWALLD -gt 0 ]; then
+		for LFWZONE in $(firewall-cmd --get-zones | xargs -n 1 | sort)
+		do
+			if [ $(firewall-cmd --zone=${LFWZONE} --list-services | xargs -n 1 | grep -c -E "^${LAPP_NAME}$") -gt 0 ]; then
+				firewall-cmd --permanent --zone=${LFWZONE} --remove-service=${LAPP_NAME}
+			fi
+		done
+		firewall-cmd --reload
+	
+	elif [ $USE_UFW -gt 0 ]; then
+		LRULE="$(ufw status | grep -E "^${LAPP_NAME}\s+ALLOW.*$")"
+		if [ $(echo "$LRULE" | grep -c 'Anywhere') -gt 0 ]; then
+			ufw delete allow "$LAPP_NAME" >/dev/null && error_echo "Closing Anywhere for application ${LAPP_NAME}.."
+		else
+			LSUBNET="$(echo "$LRULE" | xargs | sed -n -e 's/^.*ALLOW\s\+\(.*\)$/\1/p')"
+			[ ! -z "$LSUBNET" ] && ufw delete allow from "$LSUBNET" to any app "$LAPP_NAME" >/dev/null && error_echo "Closing ${LSUBNET} for application ${LAPP_NAME}.."
+		fi
+	fi
+	
+	return 0
+	
+}
+
+
+
+########################################################################################
+# firewall_app_close( app_name, iface || ipaddr )
+########################################################################################
+firewall_app_closex(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LAPP_NAME="$1"
+	local LPARAM="$2"
+	local LFWZONE=
+	local LRULE_NUM=
+	if [ $USE_FIREWALLD -gt 0 ]; then
+		#~ for LFWZONE in $(firewall-cmd --get-default-zone) 'public'
+		for LFWZONE in $(firewall-cmd --list-all-zones | grep -v -E '^\s+.*' | xargs)
+		do
+			if [ $(firewall-cmd --zone=${LFWZONE} --list-all | grep 'services:' | \
+					xargs -n 1 | grep -c -E "^${LAPP_NAME}\$") -gt 0 ]; then
+				firewall-cmd --permanent --zone=${LFWZONE} --remove-service=${LAPP_NAME}
+			fi
+		done
+		firewall-cmd --reload
+	else
+		#~ [ $DEBUG -gt 0 ] && ufw status numbered | grep -E "^\[ *[[:digit:]]+\]\s+${LAPP_NAME}\s+ALLOW.*\$" 
+		for LRULE_NUM in  $(ufw status numbered | grep -E "^\[\s*[[:digit:]]+\]\s+${LAPP_NAME}\s+ALLOW.*\$" | sed -n -e 's/^\[\s*\([[:digit:]]\+\)\].*$/\1/p')
+		do
+			#~ [ $DEBUG -gt 0 ] && ufw status numbered | grep -E "^\[ *[[:digit:]]+\]\s+${LAPP_NAME}\s+ALLOW.*\$" 
+			[ $DEBUG -gt 0 ] && error_echo "ufw delete ${LRULE_NUM}"
+			[ ! -z "$LRULE_NUM" ] && echo 'Y' | ufw delete "$LRULE_NUM"
+		done
+	fi
+
+	# If the firewall is still closed for the app..
+	if ( ! firewall_app_check "$LAPP_NAME" ); then
+		[ $QUIET -lt 1 ] && error_echo "Error: unable to close ${LIPADDR} - ${LFWZONE} for ${LAPP_NAME}"
+		return 1
+	fi
+
+	return 0
+}
+
+
+########################################################################################
+# iface_firewall_app_check( iface, appname )-- checks the firewall to see if a app/service
+#		file is installed and activated by the firewall. If the iface is null, then checks
+#		to see if the firewall is open to all subnets / public zone for the app.
+#		Returns 0 if the firewall is not open for the app, 1 if opened for the app.
+########################################################################################
+iface_firewall_app_check(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LIFACE="$1"
+	local LAPP_NAME="$2"
+	local LFWZONE=
+	local LSUBNET=
+	
+	# If the App file is not installed, by definition, the app's port(s) has/have not been opened.
+	! firewall_app_file_check "$LAPP_NAME" && return 0
+		
+	if [ $USE_FIREWALLD -gt 0 ]; then
+		if [ -z "$LIFACE" ]; then
+			LFWZONE='public'
+		else
+			LFWZONE="$(iface_firewall_zone_get "$LIFACE")"
+		fi
+		
+		[ $(firewall-cmd --zone=${LFWZONE} --list-all | grep 'services:' | \
+			xargs -n 1 | grep -c -E "^${LAPP_NAME}\$") -gt 0 ] && return 1 || return 0
+
+	else
+		# UFW
+		#~ LSECTIONS="$(cat $LCONF_FILE | sed -n -e 's/^\[\(.*\)\].*$/\1/p' | xargs)"
+		#~ for LSECTION in $LSECTIONS
+		#~ do
+			#~ ufw status | grep -c -E "^${LSECTION}\s+ALLOW"
+		#~ done
+		if [ -z "$LIFACE" ]; then
+			[ $(ufw status | grep -c -E "^${LAPP_NAME}\s+ALLOW\s+Anywhere.*$") -gt 0 ] && return 1 || return 0
+		else
+			LSUBNET="$(iface_subnet_get "$LIFACE")"
+			[ $(ufw status | grep -c -E "^${LAPP_NAME}\s+ALLOW\s+${LGATEWAY}.*$") -gt 0 ] && return 1 || return 0
+		fi
+	fi
+}
+
+########################################################################################
+# ipaddr_firewall_app_check( ipaddr, appname )-- checks the firewall to see if a app/service
+#		file is installed and activated by the firewall. If the ipaddr is null, then checks
+#		to see if the firewall is open to all subnets / public zone for the app.
+#		Returns 0 if the firewall is not open for the app, 1 if opened for the app.
+########################################################################################
+ipaddr_firewall_app_check(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LIPADDR="$1"
+	local LAPP_NAME="$2"
+	local LFWZONE=
+	local LSUBNET=
+	
+	# If the App file is not installed, by definition, the app's port(s) has/have not been opened.
+	! firewall_app_file_check "$LAPP_NAME" && return 0
+	
+	if [ $USE_FIREWALLD -gt 0 ]; then
+		if [ -z "$LIPADDR" ]; then
+			LFWZONE='public'
+		else
+			LFWZONE="$(ipaddr_firewall_zone_get "$LIPADDR")"
+		fi
+		
+		[ $(firewall-cmd --zone=${LFWZONE} --list-all | grep 'services:' | \
+			xargs -n 1 | grep -c -E "^${LAPP_NAME}\$") -gt 0 ] && return 1 || return 0
+
+	else
+		if [ -z "$LIPADDR" ]; then
+			[ $(ufw status | grep -c -E "^${LAPP_NAME}\s+ALLOW\s+Anywhere.*$") -gt 0 ] && return 1 || return 0
+		else
+			LSUBNET="$(ipaddr_subnet_get "$LIPADDR")"
+			[ $(ufw status | grep -c -E "^${LAPP_NAME}\s+ALLOW\s+${LGATEWAY}.*$") -gt 0 ] && return 1 || return 0
+		fi
+	fi
+}
+
+########################################################################################
+# iface_firewall_app_open( iface, app_name ) -- opens the firewall for the subnet
+#	of the iface for the app.  If the iface is null, then opens the firewall for the app from
+#	all subnets, i.e. public.
+########################################################################################
+iface_firewall_app_open(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LIFACE="$1"
+	local LAPP_NAME="$2"
+	local LFWZONE=
+	local LSUBNET=
+	
+	if [ $USE_FIREWALLD -gt 0 ]; then
+		if [ -z "$LIFACE" ]; then
+			LFWZONE='public'
+		else
+			LFWZONE="$(iface_firewall_zone_get "$LIFACE")"
+		fi
+	
+		firewall-cmd --permanent --zone=${LFWZONE} --add-service=${LAPP_NAME}
+		firewall-cmd --reload
+		
+	else
+		if [ -z "$LIFACE" ]; then
+			ufw allow "$LAPP_NAME"
+		else
+			LSUBNET="$(iface_subnet_get "$LIFACE")"
+		#~  ufw allow from 192.168.0.0/16 to any app <name>			
+			ufw allow from "$LSUBNET" to any app "$LAPP_NAME"
+		fi
+	fi
+	
+	# If the firewall is still closed for the app..
+	if ( iface_firewall_app_check "$LIFACE" "$LAPP_NAME" ); then
+		[ $QUIET -lt 1 ] && error_echo "Error: unable to open ${LIFACE} - ${LFWZONE} for ${LAPP_NAME}"
+		return 1
+	fi
+	
+	return 0
+}
+
+########################################################################################
+# iface_firewall_service_open( iface, app_name ) -- opens the firewall for the subnet
+#	of the iface for the service.  If the iface is null, then opens the firewall for 
+#   the service from all subnets, i.e. public.
+########################################################################################
+iface_firewall_service_open(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LIFACE="$1"
+	local LSERVICE="$2"
+	local LFWZONE=
+	local LSUBNET=
+	
+	if [ $USE_FIREWALLD -gt 0 ]; then
+		if [ -z "$LIFACE" ]; then
+			LFWZONE='public'
+		else
+			LFWZONE="$(iface_firewall_zone_get "$LIFACE")"
+		fi
+	
+		firewall-cmd --permanent --zone=${LFWZONE} --add-service=${LSERVICE}
+		firewall-cmd --reload
+		
+	else
+		if [ -z "$LIFACE" ]; then
+			ufw allow "$LSERVICE"
+		else
+			LSUBNET="$(iface_subnet_get "$LIFACE")"
+			ufw allow from "$LSUBNET" to any port "$LSERVICE"
+		fi
+	fi
+	
+	# If the firewall is still closed for the app..
+	if ( iface_firewall_app_check "$LIFACE" "$LAPP_NAME" ); then
+		[ $QUIET -lt 1 ] && error_echo "Error: unable to open ${LIFACE} - ${LFWZONE} for ${LAPP_NAME}"
+		return 1
+	fi
+	
+	return 0
+}
+
+########################################################################################
+# iface_firewall_app_close( app_name ) -- closes the firewall for the subnet
+#	of the iface for the app.  If the iface is null, then closes the firewall 
+#	for the app from all subnets, i.e. public.
+########################################################################################
+iface_firewall_app_close(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LIFACE="$1"
+	local LAPP_NAME="$2"
+	local LFWZONE=
+	local LSUBNET=
+	local LRULE_NUM=
+	
+	if [ $USE_FIREWALLD -gt 0 ]; then
+		if [ -z "$LIFACE" ]; then
+			LFWZONE='public'
+		else
+			LFWZONE="$(iface_firewall_zone_get "$LIFACE")"
+		fi
+	
+		firewall-cmd --permanent --zone=${LFWZONE} --remove-service=${LAPP_NAME}
+		firewall-cmd --reload
+	else
+		if [ -z "$LIFACE" ]; then
+			#~ find & delete a app rule number:
+			LRULE_NUM="$(ufw status numbered | grep -E "^\[[[:digit:]]+\]\s+${LAPP_NAME}\s+ALLOW.*Anywhere.*" | sed -n -e 's/^\[\([[:digit:]]\+\)\].*$/\1/p')"
+		else
+			LSUBNET="$(iface_subnet_get "$LIFACE")"
+			LRULE_NUM="$(ufw status numbered | grep -E "^\[[[:digit:]]+\]\s+${LAPP_NAME}\s+ALLOW.*${LSUBNET}.*" | sed -n -e 's/^\[\([[:digit:]]\+\)\].*$/\1/p')"
+		fi
+		[ ! -z "$LRULE_NUM" ] && echo 'Y' | ufw delete "$LRULE_NUM"
+	fi
+	
+	# If the firewall is still closed for the app..
+	if ( ! iface_firewall_app_check "$LIFACE" "$LAPP_NAME" ); then
+		[ $QUIET -lt 1 ] && error_echo "Error: unable to close ${LIFACE} - ${LFWZONE} for ${LAPP_NAME}"
+		return 1
+	fi
+	
+	return 0
+}
+
+########################################################################################
+# ipaddr_firewall_app_open( ipaddr, app_name ) -- opens the firewall for the subnet
+#	of ipaddr for the app.  If ipaddr is null, then opens the firewall for the app from
+#	all subnets, i.e. public.
+########################################################################################
+ipaddr_firewall_app_open(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LIPADDR="$1"
+	local LAPP_NAME="$2"
+	local LFWZONE=
+	local LSUBNET=
+	
+	if [ $USE_FIREWALLD -gt 0 ]; then
+		if [ -z "$LIPADDR" ]; then
+			LFWZONE='public'
+		else
+			LFWZONE="$(ipaddr_firewall_zone_get "$LIPADDR")"
+		fi
+	
+		firewall-cmd --permanent --zone=${LFWZONE} --add-service=${LAPP_NAME}
+		firewall-cmd --reload
+		
+	else
+		if [ -z "$LIPADDR" ]; then
+			ufw allow "$LAPP_NAME"
+		else
+			LSUBNET="$(ipaddr_subnet_get "$LIPADDR")"
+			ufw allow from "$LSUBNET" to any app "$LAPP"
+		fi
+	
+	fi
+	
+	# If the firewall is still closed for the app..
+	if ( ipaddr_firewall_app_check "$LIPADDR" "$LAPP_NAME" ); then
+		[ $QUIET -lt 1 ] && error_echo "Error: unable to open ${LIPADDR} - ${LFWZONE} for ${LAPP_NAME}"
+		return 1
+	fi
+	
+	return 0
+	
+}
+
+########################################################################################
+# ipaddr_firewall_app_close( app_name ) -- closes the firewall for the subnet
+#	of the ipaddr for the app.  If the ipaddr is null, then closes the firewall 
+#	for the app from all subnets, i.e. public.
+########################################################################################
+ipaddr_firewall_app_close(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LIPADDR="$1"
+	local LAPP_NAME="$2"
+	local LFWZONE=
+	local LSUBNET=
+	local LRULE_NUM=
+	
+	if [ $USE_FIREWALLD -gt 0 ]; then
+		if [ -z "$LIPADDR" ]; then
+			LFWZONE='public'
+		else
+			LFWZONE="$(ipaddr_firewall_zone_get "$LIPADDR")"
+		fi
+	
+		firewall-cmd --permanent --zone=${LFWZONE} --remove-service=${LAPP_NAME}
+		firewall-cmd --reload
+	else
+		if [ -z "$LIPADDR" ]; then
+			#~ find & delete a app rule number:
+			LRULE_NUM="$(ufw status numbered | grep -E "^\[[[:digit:]]+\]\s+${LAPP_NAME}\s+ALLOW.*Anywhere.*" | sed -n -e 's/^\[\([[:digit:]]\+\)\].*$/\1/p')"
+		else
+			LSUBNET="$(ipaddr_subnet_get "$LIPADDR")"
+			LRULE_NUM="$(ufw status numbered | grep -E "^\[[[:digit:]]+\]\s+${LAPP_NAME}\s+ALLOW.*${LSUBNET}.*" | sed -n -e 's/^\[\([[:digit:]]\+\)\].*$/\1/p')"
+		fi
+		[ ! -z "$LRULE_NUM" ] && echo 'Y' | ufw delete "$LRULE_NUM"
+	fi
+	
+	# If the firewall is still closed for the app..
+	if ( ! ipaddr_firewall_app_check "$LIPADDR" "$LAPP_NAME" ); then
+		[ $QUIET -lt 1 ] && error_echo "Error: unable to close ${LIPADDR} - ${LFWZONE} for ${LAPP_NAME}"
+		return 1
+	fi
+	
+	return 0
+}
+
+
+
+# echos port/protocol from a named service in /etc/services; returns 0: service exists; 1: service does not exist
+firewall_service_portprot_get(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LAPP_NAME="$1"
+	local LSERVICES='/etc/services'
+	local LPORTSPROTS=
+	
+	# Is the app / service present in /etc/services?
+	( ! firewall_service_exists $LAPP_NAME ) && return 1
+	
+	LPORTSPROTS=$(cat "$LSERVICES" | grep -E "^${LAPP_NAME}\s+" | sed -n -e 's/^[^[:digit:]]\+\([[:digit:]]\+\/[tcudp]\+\).*$/\1/p' | xargs)
+	[ ! -z "$LPORTSPROTS" ] && echo $LPORTSPROTS || return 1
+
+	return 0
+}
+
+
+firewall_apps_list(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LOPEN_ONLY=${$:-0}
+	if [ $USE_FIREWALLD -gt 0 ]; then
+		if [ $LOPEN_ONLY -gt 0 ]; then
+			firewall-cmd --list-all-zones | grep 'services:' | sed -n -e 's/\s*services: \(.*\)/\1/p' | xargs -n 1 | sort --unique
+		else
+			firewall-cmd --get-services | xargs -n 1 | sort --unique
+		fi
+	elif [ $USE_UFW -gt 0 ]; then
+		if [ $LOPEN_ONLY -gt 0 ]; then
+			ufw status verbose | grep -v -E 'Logging|Default' | sed -n -e 's/.*(\(.\+\)).*$/\1/p' | sort --unique
+		else
+			ufw app list | grep -E '^\s+' | xargs -n 1 | sort --unique
+		fi
+	fi
+}
+
+
+# Returns 0 == service/app not open; 1 == app/service open on firewall..
+firewall_app_check(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LAPP_NAME="$1"
+	local LPUBLIC=${2:-0}
+	local LFWZONE=
+	local LSUBNET=
+	local LPORTS=
+	local LPORT=
+	local LRULE_NUM=
+	
+		
+	if [ $USE_FIREWALLD -gt 0 ]; then
+		if [ $LPUBLIC -gt 0 ]; then
+			LFWZONE='public'
+		else
+			LSWZONE="$(firewall-cmd --get-default-zone)"
+		fi
+
+		if [ $(firewall-cmd "--zone=${LFWZONE}" --list-all | grep 'services:' | \
+				xargs -n 1 | sort | grep -c -E "^${LAPP_NAME}\$") -gt 0 ]; then
+			return 1
+		else
+			return 0
+		fi
+	else
+		
+		
+		if [ $(ufw status | grep -c -E "^${LAPP_NAME}\s+ALLOW.*\$") -gt 0 ]; then
+			return 1
+
+		# See if the app exists in /etc/services
+		#~ elif ( firewall_service_exists $LAPP_NAME ); then
+			#~ for LPORT in $(firewall_service_portprot_get "$LAPP_NAME")
+			#~ do
+				
+			#~ done
+		#~ else
+			#~ return 0
+		fi
+	fi
+	
+}
+
+firewall_app_info(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LAPP_NAME="$1"
+	if [ $USE_FIREWALLD -gt 0 ]; then
+		firewall-cmd "--info-service=${LAPP_NAME}"
+	elif [ $USE_UFW -gt 0 ]; then
+		ufw app info "$LAPP_NAME"
+	fi
+	return $?
+}
+
+firewall_app_remove(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LAPP_NAME="$1"
+	local LCONF_DIR=
+	local LCONF_FILE=
+	if [ $USE_FIREWALLD -gt 0 ]; then
+		LCONF_DIR='/lib/firewalld/services'
+		if [ ! -d "$LCONF_DIR" ]; then
+			error_echo "Error: ${LCONF_DIR} not found."
+			return 1
+		fi
+		LCONF_FILE="${LCONF_DIR}/${LAPP_NAME}.xml"
+	else
+		LCONF_DIR='/etc/ufw/applications.d'
+		if [ ! -d "$LCONF_DIR" ]; then
+			error_echo "Error: ${LCONF_DIR} not found."
+			return 1
+		fi
+		LCONF_FILE="${LCONF_DIR}/${LAPP_NAME}"
+	fi
+	if [ -f "$LCONF_FILE" ]; then
+		error_echo "Removing firewall application file ${LCONF_FILE}.."
+		rm -f "$LCONF_FILE"
+		[ $USE_UFW -gt 0 ] && ufw app update all
+
+	else
+		error_echo "Error: Firewall application file ${LCONF_FILE} not found.."
+	fi
+	
+	return 0
+}
+
+firewall_port_open(){
 	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
 	local LPROTOCOL="$1"
 	local LPORT="$2"
-	local LIFACE=
+	local LPARAMS="$3"
+	local LPARAM=
+	local LFWZONE=
+	local LSUBNET=
+	
+	[ $USE_FIREWALLD -gt 0 ] && LPORT="${LPORT//:/-}" || LPORT="${LPORT//-/:}"
 
-	for LIFACE in $(ifaces_get)
-	do
-		iface_firewall_close_port "$LIFACE" "$LPROTOCOL" "$LPORT"
-	done
+	if [ -z "$LPARAMS" ]; then
+		# Open publically..
+		if [ $USE_FIREWALLD -gt 0 ]; then
+			LFWZONE='public'
+			firewall-cmd "--permanent" "--zone=${LFWZONE}" "--add-port=${LPORT}/${LPROTOCOL}" >/dev/null && echo "Opening ${LFWZONE} for ${LPROTOCOL} port ${LPORT}"
+		else
+			ufw allow proto "${LPROTOCOL}" to any port "${LPORT}" >/dev/null && echo "Opening Anywhere for ${LPROTOCOL} port ${LPORT}"
+		fi
+		return $?
+	else
+		# LPARAMS can be an array of ip addresses or interface devices..
+		for LPARAM in $LPARAMS
+		do
+			if ( ipaddr_is_valid "$LPARAM" ); then
+				[ $USE_FIREWALLD -gt 0 ] && LFWZONE="$(ipaddr_firewall_zone_get "$LPARAM")" || LSUBNET="$(ipaddr_subnet_get "$LPARAM")"
+			elif (iface_is_valid "$LPARAM" ); then
+				[ $USE_FIREWALLD -gt 0 ] && LFWZONE="$(iface_firewall_zone_get "$LPARAM")" || LSUBNET="$(iface_subnet_get "$LPARAM")"
+			else
+				error_echo "Error: ${LPARAM} is neither an ipaddr or iface."
+				continue
+			fi
+			
+			if [ $USE_FIREWALLD -gt 0 ]; then
+				[ ! -z "$LFWZONE" ] && firewall-cmd "--permanent" "--zone=${LFWZONE}" "--add-port=${LPORT}/${LPROTOCOL}" >/dev/null && error_echo "Opening ${LFWZONE} for ${LPROTOCOL} port ${LPORT}"
+			else
+				[ ! -z "$LSUBNET" ] && ufw allow proto "${LPROTOCOL}" to any port "${LPORT}" from "$LSUBNET" >/dev/null && error_echo "Opening ${LSUBNET} for ${LPROTOCOL} port ${LPORT}"
+			fi
+		done
+	fi
+}
+
+firewall_port_close(){
+	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
+	local LPROTOCOL="$1"
+	local LPORT="$2"
+	local LPARAMS="$3"
+	local LPARAM=
+	local LFWZONE=
+	local LSUBNET=
+	
+	[ $USE_FIREWALLD -gt 0 ] && LPORT="${LPORT//:/-}" || LPORT="${LPORT//-/:}"
+
+	if [ -z "$LPARAMS" ]; then
+		# Open publically..
+		if [ $USE_FIREWALLD -gt 0 ]; then
+			LFWZONE='public'
+			firewall-cmd "--permanent" "--zone=${LFWZONE}" "--remove-port=${LPORT}/${LPROTOCOL}" >/dev/null && echo "Closing ${LFWZONE} for ${LPROTOCOL} port ${LPORT}"
+		else
+			ufw delete allow proto "${LPROTOCOL}" to any port "${LPORT}" >/dev/null && "Closing Anywhere for ${LPROTOCOL} port ${LPORT}"
+		fi
+		return $?
+	else
+		# LPARAMS can be an array of ip addresses or interface devices..
+		for LPARAM in $LPARAMS
+		do
+			if ( ipaddr_is_valid "$LPARAM" ); then
+				[ $USE_FIREWALLD -gt 0 ] && LFWZONE="$(ipaddr_firewall_zone_get "$LPARAM")" || LSUBNET="$(ipaddr_subnet_get "$LPARAM")"
+			elif (iface_is_valid "$LPARAM" ); then
+				[ $USE_FIREWALLD -gt 0 ] && LFWZONE="$(iface_firewall_zone_get "$LPARAM")" || LSUBNET="$(iface_subnet_get "$LPARAM")"
+			else
+				error_echo "Error: ${LPARAM} is neither an ipaddr or iface."
+				continue
+			fi
+			
+			if [ $USE_FIREWALLD -gt 0 ]; then
+				[ ! -z "$LFWZONE" ] && firewall-cmd "--permanent" "--zone=${LFWZONE}" "--remove-port=${LPORT}/${LPROTOCOL}" >/dev/null && error_echo "Closing ${LFWZONE} for ${LPROTOCOL} port ${LPORT}"
+			else
+				[ ! -z "$LSUBNET" ] && ufw delete allow proto "${LPROTOCOL}" to any port "${LPORT}" from "$LSUBNET" >/dev/null && error_echo "Closing ${LSUBNET} for ${LPROTOCOL} port ${LPORT}"
+			fi
+		done
+	fi
 }
 
 
@@ -1660,7 +2664,9 @@ iface_firewall_zone_get(){
 	fi
 
 	if [ $USE_FIREWALLD -gt 0 ]; then
-		LFWZONE="$(firewall-cmd "--get-zone-of-interface=${LIFACE}")"
+		LFWZONE="$(firewall-cmd "--get-zone-of-interface=${LIFACE}" 2>/dev/null)"
+		# As of Fedora 33, interfaces & ipaddrs don't seem to have assigned zones
+		[ -z "$LFWZONE" ] && LFWZONE="$(firewall-cmd --get-default-zone)"
 	fi
 
 	[ $DEBUG -gt 0 ] && error_echo "Firewall zone of ${LIFACE} == ${LFWZONE}"
@@ -1678,7 +2684,9 @@ ipaddr_firewall_zone_get(){
 	fi
 
 	if [ $USE_FIREWALLD -gt 0 ]; then
-		LFWZONE="$(firewall-cmd "--get-zone-of-source=${LIPADDR}")"
+		LFWZONE="$(firewall-cmd "--get-zone-of-source=${LIPADDR}" 2>/dev/null)"
+		# As of Fedora 33, interfaces & ipaddrs don't seem to have assigned zones
+		[ -z "$LFWZONE" ] && LFWZONE="$(firewall-cmd --get-default-zone)"
 	fi
 
 	[ $DEBUG -gt 0 ] && error_echo "Firewall zone of ${LIPADDR} == ${LFWZONE}"
@@ -1742,100 +2750,89 @@ ifaces_detect(){
 
 
 ########################################################################################
-# iface_firewall_check_port [netdev] [udp|tcp] [portno] -- checks the firewall to see if a port is already open
+# iface_firewall_port_check [netdev] [udp|tcp] [portno] -- checks the firewall to see if a port is already open
 #								   Returns 0 if the port is closed, 1 if open
 ########################################################################################
 
-iface_firewall_check_port(){
+iface_firewall_port_check(){
 	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
 	local LIFACE="$1"
 	local LPROTOCOL=$2
 	local LPORT=$3
-	local LIPADDR=$4
 	local LFWZONE=
 	local LSUBNET=
 
-	if [ -z "$LIFACE" ]; then
-		LIFACE="$(iface_primary_get)"
-	else
-		iface_validate "$LIFACE"
-		# Bad interface name??
-		if [ $? -gt 0 ]; then
-			exit 1
-		fi
+	if [ ! -z "$LIFACE" ]; then
+		iface_is_valid "$LIFACE" || return 1
 	fi
 
 	if [ $USE_FIREWALLD -gt 0 ]; then
+		# translate colons into hyphens for firewalld port ranges..
 		LPORT="${LPORT//:/-}"
-		LFWZONE="$(iface_firewall_zone_get "$LIFACE")"
+		[ ! -z "$LIFACE" ] && LFWZONE="$(iface_firewall_zone_get "$LIFACE")"  || LFWZONE='public'
 
-		if [ "$(firewall-cmd "--permanent" "--zone=${LFWZONE}" "--query-port=${LPORT}/${LPROTOCOL}" 2>&1)" = 'yes' ]; then
-			return 1
-		else
-			return 0
-		fi
-
+		[ "$(firewall-cmd "--permanent" "--zone=${LFWZONE}" "--query-port=${LPORT}/${LPROTOCOL}" 2>&1)" = 'yes' ] && return 1 || return 0
 	else
 		# translate hyphens into colons for ufw port ranges..
 		LPORT="${LPORT//-/:}"
-		LSUBNET="$(iface_subnet_get "$LIFACE" "$LIPADDR")"
 
-		#~ echo "^${LPORT}/${LPROTOCOL}\s+ALLOW\s+${LSUBNET}"
-		#~ ufw status | grep -E "^${LPORT}/${LPROTOCOL}\s+ALLOW\s+${LSUBNET}"
-
-		if [ $(ufw status | grep -c -E "^${LPORT}/${LPROTOCOL}\s+ALLOW\s+${LSUBNET}") -gt 0 ]; then
-			return 1
+		if [ -z "$LIFACE" ]; then
+			[ $(ufw status | grep -c -E "^${LPORT}/${LPROTOCOL}\s+ALLOW\s+Anywhere") -gt 0 ] && return 1 || return 0
 		else
-			return 0
+			LSUBNET="$(iface_subnet_get "$LIFACE")"
+			[ $(ufw status | grep -c -E "^${LPORT}/${LPROTOCOL}\s+ALLOW\s+${LSUBNET}") -gt 0 ] && return 1 || return 0
 		fi
 	fi
 }
 
-
-iface_firewall_open_port(){
+iface_firewall_port_open(){
 	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
 	local LIFACE="$1"
 	local LPROTOCOL=$2
 	local LPORT=$3
 	local LIPADDR=$4
+	local LNETMASK=$5
 	local LFWZONE=
 	local LSUBNET=
+	
 
-	if [ -z "$LIFACE" ]; then
-		LIFACE="$(iface_primary_get)"
-	else
-		iface_validate "$LIFACE"
-		# Bad interface name??
-		if [ $? -gt 0 ]; then
-			exit 1
-		fi
-	fi
-
-	LSUBNET="$(iface_subnet_get "$LIFACE" "$LIPADDR")"
-
-	iface_firewall_check_port "$LIFACE" "$LPROTOCOL" "$LPORT" "$LIPADDR"
-
-	if [ $? -gt 0 ]; then
-		LSUBNET="$(iface_subnet_get "$LIFACE")"
-		error_echo "${LPROTOCOL} port ${LPORT} already open for ${LIFACE} ${LSUBNET}"
+	if ( ! iface_firewall_port_check "$LIFACE" "$LPROTOCOL" "$LPORT" ); then
+		error_echo "Error: ${LPORT}/${LPROTOCOL} is already open for ${LIFACE}"
 		return 1
 	fi
+	
+	# Fixup range delimiter
+	[ $USE_FIREWALLD -gt 0 ] && LPORT="${LPORT//:/-}" || LPORT="${LPORT//-/:}"
+
+	# Open publically..
+	if [ -z "$LIFACE" ]; then
+
+		if [ $USE_FIREWALLD -gt 0 ]; then
+			LFWZONE='public'
+			echo "Opening ${LIFACE} ${LFWZONE} for ${LPROTOCOL} port ${LPORT}"
+			firewall-cmd "--permanent" "--zone=${LFWZONE}" "--add-port=${LPORT}/${LPROTOCOL}"
+		else
+			ufw allow proto "${LPROTOCOL}" to any port "${LPORT}"
+		fi
+		return $?
+	fi
+	
+	iface_is_valid "$LIFACE" || return 1
+
+	LSUBNET="$(iface_subnet_get "$LIFACE")"
 
 	if [ $USE_FIREWALLD -gt 0 ]; then
-		LPORT="${LPORT//:/-}"
 		LFWZONE="$(iface_firewall_zone_get "$LIFACE")"
 		echo "Opening ${LIFACE} ${LFWZONE} for ${LPROTOCOL} port ${LPORT}"
 		firewall-cmd "--permanent" "--zone=${LFWZONE}" "--add-port=${LPORT}/${LPROTOCOL}"
 	else
-		LPORT="${LPORT//-/:}"
-		LSUBNET="$(iface_subnet_get "$LIFACE")"
-		echo "Opening ${LIFACE} ${LSUBNET} for ${LPROTOCOL} port ${LPORT}"
+		error_echo "Opening ${LIFACE} ${LSUBNET} for ${LPROTOCOL} port ${LPORT}"
 		[ ! -z "$LSUBNET" ] && ufw allow proto "${LPROTOCOL}" to any port "${LPORT}" from "$LSUBNET" >/dev/null
 	fi
 
 }
 
-iface_firewall_close_port(){
+iface_firewall_port_close(){
 	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
 	local LIFACE="$1"
 	local LPROTOCOL=$2
@@ -1846,14 +2843,14 @@ iface_firewall_close_port(){
 	if [ -z "$LIFACE" ]; then
 		LIFACE="$(iface_primary_get)"
 	else
-		iface_validate "$LIFACE"
+		iface_is_valid "$LIFACE"
 		# Bad interface name??
 		if [ $? -gt 0 ]; then
 			exit 1
 		fi
 	fi
 
-	iface_firewall_check_port "$LIFACE" "$LPROTOCOL" "$LPORT"
+	iface_firewall_port_check "$LIFACE" "$LPROTOCOL" "$LPORT"
 
 	if [ $? -lt 1 ]; then
 		LSUBNET="$(iface_subnet_get "$LIFACE")"
@@ -1884,11 +2881,11 @@ iface_firewall_close_port(){
 ########################################################################################
 
 ########################################################################################
-# iface_firewall_check_port [netdev] [udp|tcp] [portno] -- checks the firewall to see if a port is already open
+# ipaddr_firewall_port_check [netdev] [udp|tcp] [portno] -- checks the firewall to see if a port is already open
 #								   Returns 0 if the port is closed, 1 if open
 ########################################################################################
 
-ipaddr_firewall_check_port(){
+ipaddr_firewall_port_check(){
 	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
 	local LIPADDR="$1"
 	local LPROTOCOL=$2
@@ -1923,8 +2920,8 @@ ipaddr_firewall_check_port(){
 	fi
 }
 
-
-ipaddr_firewall_open_port(){
+# A NULL ipaddr will not result in a public open, unlike iface_firewall_port_open()
+ipaddr_firewall_port_open(){
 	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
 	local LIPADDR="$1"
 	local LPROTOCOL=$2
@@ -1932,19 +2929,18 @@ ipaddr_firewall_open_port(){
 	local LFWZONE=
 	local LSUBNET=
 
-	if [ -z "$LIFACE" ]; then
-		LIFACE="$(iface_primary_get)"
-	else
-		iface_validate "$LIFACE"
-		# Bad interface name??
-		if [ $? -gt 0 ]; then
-			exit 1
-		fi
+
+	if ( ! ipaddr_firewall_port_check "$LIPADDR" "$LPROTOCOL" "$LPORT" ); then
+		error_echo "Error: ${LPORT}/${LPROTOCOL} is already open for ${LIPADDR}"
+		return 1
 	fi
+
+
+	ipaddr_is_valid "$LIPADDR" || return 1
 
 	LSUBNET="$(ipaddr_subnet_get "$LIPADDR")"
 
-	ipaddr_firewall_check_port "$LIPADDR" "$LPROTOCOL" "$LPORT"
+	ipaddr_firewall_port_check "$LIPADDR" "$LPROTOCOL" "$LPORT"
 
 	if [ $? -gt 0 ]; then
 		error_echo "${LPROTOCOL} port ${LPORT} already open for ${LSUBNET}"
@@ -1955,7 +2951,7 @@ ipaddr_firewall_open_port(){
 		# translate colons into hyphens for port ranges
 		LPORT="${LPORT//:/-}"
 		LFWZONE="$(ipaddr_firewall_zone_get "$LIPADDR")"
-		echo "Opening ${LSUBNET} ${LFWZONE} for ${LPROTOCOL} port ${LPORT}"
+		error_echo "Opening ${LSUBNET} ${LFWZONE} for ${LPROTOCOL} port ${LPORT}"
 		# firewall-cmd uses hyphens to specify port ranges
 		firewall-cmd "--permanent" "--zone=${LFWZONE}" "--add-port=${LPORT}/${LPROTOCOL}"
 	else
@@ -1964,13 +2960,13 @@ ipaddr_firewall_open_port(){
 		# ufw allow 49152:49183/tcp
 		# ufw allow proto tcp to any port 49152:49183 from 192.168.1.0/24
 		LPORT="${LPORT//-/:}"
-		echo "Opening ${LSUBNET} for ${LPROTOCOL} port ${LPORT}"
+		error_echo "Opening ${LSUBNET} for ${LPROTOCOL} port ${LPORT}"
 		ufw allow proto "${LPROTOCOL}" to any port "${LPORT}" from "$LSUBNET" >/dev/null
 	fi
 
 }
 
-ipaddr_firewall_close_port(){
+ipaddr_firewall_port_close(){
 	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
 	local LIPADDR="$1"
 	local LPROTOCOL="$2"
@@ -1978,7 +2974,7 @@ ipaddr_firewall_close_port(){
 	local LFWZONE=
 	local LSUBNET=
 
-	ipaddr_firewall_check_port "$LIPADDR" "$LPROTOCOL" "$LPORT"
+	ipaddr_firewall_port_check "$LIPADDR" "$LPROTOCOL" "$LPORT"
 
 	LSUBNET="$(ipaddr_subnet_get "$LIPADDR")"
 
@@ -2103,7 +3099,7 @@ service_priority_set(){
 
 
 ######################################################################################################
-# is_service( service_name ) -- returns 0 if the 
+# is_service( service_name ) -- returns 0 if the service init script exists
 ######################################################################################################
 is_service(){
 	local LSERVICE_NAME="$1"
@@ -2789,6 +3785,10 @@ systemd_unit_file_workingdir_remove(){
 ######################################################################################################
 systemd_unit_file_prestart_set(){
 	EXEC_ARGS="$@"
+	
+	if [ $(echo "$EXEC_ARGS" | grep -c -E '^[-@:!+]') -lt 1 ]; then
+		EXEC_ARG="-${EXEC_ARGS}"
+	fi
 
 	if [ $(echo "$INST_NAME" | grep -c -e '.*\..*') -gt 0 ]; then
 		UNIT="$INST_NAME"
@@ -2810,7 +3810,7 @@ systemd_unit_file_prestart_set(){
 			EXEC_ARGS="$(echo "$EXEC_ARGS" | sed -e 's/[\/&]/\\&/g')"
 			echo "Setting ${UNIT_FILE} ExecStartPre=-${EXEC_ARGS}"
 			#~ ExecStartPre=-/bin/rm -f /etc/apcupsd/powerfail
-			sed -i -e "s/^ExecStart.*\$/ExecStartPre=-${EXEC_ARGS}\n&/" "$UNIT_FILE"
+			sed -i -e "s/^ExecStart.*\$/ExecStartPre=${EXEC_ARGS}\n&/" "$UNIT_FILE"
 		fi
 
 	fi
@@ -2872,6 +3872,36 @@ systemd_unit_file_restart_set(){
 		else
 			echo "Inserting \"Restart=${RESTART_ARGS}\" into ${UNIT_FILE}.."
 			sed -i "0,/^\[Service\].*\$/s//\[Service\]\nRestart=${TYPE_ARGS}/" "$UNIT_FILE"
+		fi
+	fi
+}
+
+######################################################################################################
+# systemd_unit_file_restartsecs_set() Change the restart seconds
+######################################################################################################
+systemd_unit_file_restartsecs_set(){
+	RESTART_ARGS="$@"
+
+	if [ -z "$RESTART_ARGS" ]; then
+		RESTART_ARGS='5'
+	fi
+
+	if [ $(echo "$INST_NAME" | grep -c -e '.*\..*') -gt 0 ]; then
+		UNIT="$INST_NAME"
+	else
+		UNIT="${INST_NAME}.service"
+	fi
+	UNIT_FILE="/lib/systemd/system/${UNIT}"
+
+	#RestartSec=60
+
+    if [ -f "$UNIT_FILE" ]; then
+		if [ $(grep -c -E '^Restart=.*$' "$UNIT_FILE") -gt 0 ]; then
+			echo "Changing ${UNIT_FILE} RestartSec to ${RESTART_ARGS}"
+			sed -i "s/^RestartSec=.*\$/Restart=${RESTART_ARGS}/" "$UNIT_FILE"
+		else
+			echo "Inserting \"RestartSec=${RESTART_ARGS}\" into ${UNIT_FILE}.."
+			sed -i "0,/^\[Service\].*\$/s//\[Service\]\nRestartSec=${TYPE_ARGS}/" "$UNIT_FILE"
 		fi
 	fi
 }

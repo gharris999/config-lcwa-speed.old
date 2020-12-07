@@ -1,6 +1,9 @@
 #!/bin/bash
 # lcwa-speed-debug.sh -- script to debug lcwa-speed startup..
 
+SCRIPT_VERSION=20201206.155230
+
+
 DEBUG=1
 FORCE=0
 
