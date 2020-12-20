@@ -1743,9 +1743,9 @@ firewall_service_open() {
 			fi
 			
 			if [ $USE_FIREWALLD -gt 0 ]; then
-				[ ! -z "$LFWZONE" ] && firewall-cmd "--permanent" "--zone=${LFWZONE}" "--add-service=${LSERVICE}" >/dev/null && error_echo "Opening ${LFWZONE} for service ${LSERVICE}.."
+				[ ! -z "$LFWZONE" ] && firewall-cmd "--permanent" "--zone=${LFWZONE}" "--add-service=${LSERVICE}" >/dev/null && [ $VERBOSE -gt 0 ] && error_echo "Opening ${LFWZONE} for service ${LSERVICE}.."
 			else
-				[ ! -z "$LSUBNET" ] && ufw allow from "$LSUBNET" to any port "$LSERVICE" >/dev/null && error_echo "Opening ${LSUBNET} for service ${LSERVICE}.."
+				[ ! -z "$LSUBNET" ] && ufw allow from "$LSUBNET" to any port "$LSERVICE" >/dev/null && [ $VERBOSE -gt 0 ] && error_echo "Opening ${LSUBNET} for service ${LSERVICE}.."
 			fi
 		done
 	fi
@@ -1789,9 +1789,9 @@ firewall_service_close() {
 			fi
 			
 			if [ $USE_FIREWALLD -gt 0 ]; then
-				[ ! -z "$LFWZONE" ] && firewall-cmd "--permanent" "--zone=${LFWZONE}" "--remove-service=${LSERVICE}" >/dev/null && error_echo "Closing ${LFWZONE} for service ${LSERVICE}.."
+				[ ! -z "$LFWZONE" ] && firewall-cmd "--permanent" "--zone=${LFWZONE}" "--remove-service=${LSERVICE}" >/dev/null && [ $VERBOSE -gt 0 ] && error_echo "Closing ${LFWZONE} for service ${LSERVICE}.."
 			else
-				[ ! -z "$LSUBNET" ] && ufw delete allow from "$LSUBNET" to any port "$LSERVICE" >/dev/null && error_echo "Closing ${LSUBNET} for service ${LSERVICE}.."
+				[ ! -z "$LSUBNET" ] && ufw delete allow from "$LSUBNET" to any port "$LSERVICE" >/dev/null && [ $VERBOSE -gt 0 ] && error_echo "Closing ${LSUBNET} for service ${LSERVICE}.."
 			fi
 		done
 	fi
@@ -1994,10 +1994,10 @@ firewall_app_open(){
 			fi
 			
 			if [ $USE_FIREWALLD -gt 0 ]; then
-				[ ! -z "$LFWZONE" ] && firewall-cmd "--permanent" "--zone=${LFWZONE}" "--add-service=${LAPP_NAME}" && error_echo "Opening ${LFWZONE} for application ${LAPP_NAME}.."
+				[ ! -z "$LFWZONE" ] && firewall-cmd "--permanent" "--zone=${LFWZONE}" "--add-service=${LAPP_NAME}" && [ $VERBOSE -gt 0 ] && error_echo "Opening ${LFWZONE} for application ${LAPP_NAME}.."
 				firewall-cmd --reload
 			else
-				[ ! -z "$LSUBNET" ] && ufw allow from "$LSUBNET" to any app "$LAPP_NAME" >/dev/null && error_echo "Opening ${LSUBNET} for application ${LAPP_NAME}.."
+				[ ! -z "$LSUBNET" ] && ufw allow from "$LSUBNET" to any app "$LAPP_NAME" >/dev/null && [ $VERBOSE -gt 0 ] && error_echo "Opening ${LSUBNET} for application ${LAPP_NAME}.."
 			fi
 		done
 	fi
@@ -2057,10 +2057,10 @@ firewall_app_close(){
 			fi
 			
 			if [ $USE_FIREWALLD -gt 0 ]; then
-				[ ! -z "$LFWZONE" ] && firewall-cmd "--permanent" "--zone=${LFWZONE}" "--remove-service=${LAPP_NAME}" >/dev/null && error_echo "Closing ${LFWZONE} for application ${LAPP_NAME}.."
+				[ ! -z "$LFWZONE" ] && firewall-cmd "--permanent" "--zone=${LFWZONE}" "--remove-service=${LAPP_NAME}" >/dev/null && [ $VERBOSE -gt 0 ] && error_echo "Closing ${LFWZONE} for application ${LAPP_NAME}.."
 				firewall-cmd --reload
 			else
-				[ ! -z "$LSUBNET" ] && ufw delete allow from "$LSUBNET" to any app "$LAPP_NAME" >/dev/null && error_echo "Closing ${LSUBNET} for application ${LAPP_NAME}.."
+				[ ! -z "$LSUBNET" ] && ufw delete allow from "$LSUBNET" to any app "$LAPP_NAME" >/dev/null && [ $VERBOSE -gt 0 ] && error_echo "Closing ${LSUBNET} for application ${LAPP_NAME}.."
 			fi
 		done
 	fi
@@ -2099,7 +2099,7 @@ firewall_app_close_all(){
 		for LFWZONE in $(firewall-cmd --get-zones | xargs -n 1 | sort)
 		do
 			if [ $(firewall-cmd --zone=${LFWZONE} --list-services | xargs -n 1 | grep -c -E "^${LAPP_NAME}$") -gt 0 ]; then
-				firewall-cmd --permanent --zone=${LFWZONE} --remove-service=${LAPP_NAME}
+				firewall-cmd --permanent --zone=${LFWZONE} --remove-service=${LAPP_NAME}>/dev/null && [ $VERBOSE -gt 0 ] && error_echo "Closing zone ${LFWZONE} for application ${LAPP_NAME}.."
 			fi
 		done
 		firewall-cmd --reload
@@ -2110,7 +2110,7 @@ firewall_app_close_all(){
 			ufw delete allow "$LAPP_NAME" >/dev/null && error_echo "Closing Anywhere for application ${LAPP_NAME}.."
 		else
 			LSUBNET="$(echo "$LRULE" | xargs | sed -n -e 's/^.*ALLOW\s\+\(.*\)$/\1/p')"
-			[ ! -z "$LSUBNET" ] && ufw delete allow from "$LSUBNET" to any app "$LAPP_NAME" >/dev/null && error_echo "Closing ${LSUBNET} for application ${LAPP_NAME}.."
+			[ ! -z "$LSUBNET" ] && ufw delete allow from "$LSUBNET" to any app "$LAPP_NAME" >/dev/null && [ $VERBOSE -gt 0 ] && error_echo "Closing ${LSUBNET} for application ${LAPP_NAME}.."
 		fi
 	fi
 	
@@ -2603,9 +2603,9 @@ firewall_port_open(){
 			fi
 			
 			if [ $USE_FIREWALLD -gt 0 ]; then
-				[ ! -z "$LFWZONE" ] && firewall-cmd "--permanent" "--zone=${LFWZONE}" "--add-port=${LPORT}/${LPROTOCOL}" >/dev/null && error_echo "Opening ${LFWZONE} for ${LPROTOCOL} port ${LPORT}"
+				[ ! -z "$LFWZONE" ] && firewall-cmd "--permanent" "--zone=${LFWZONE}" "--add-port=${LPORT}/${LPROTOCOL}" >/dev/null && [ $VERBOSE -gt 0 ] && error_echo "Opening ${LFWZONE} for ${LPROTOCOL} port ${LPORT}"
 			else
-				[ ! -z "$LSUBNET" ] && ufw allow proto "${LPROTOCOL}" to any port "${LPORT}" from "$LSUBNET" >/dev/null && error_echo "Opening ${LSUBNET} for ${LPROTOCOL} port ${LPORT}"
+				[ ! -z "$LSUBNET" ] && ufw allow proto "${LPROTOCOL}" to any port "${LPORT}" from "$LSUBNET" >/dev/null && [ $VERBOSE -gt 0 ] && error_echo "Opening ${LSUBNET} for ${LPROTOCOL} port ${LPORT}"
 			fi
 		done
 	fi
@@ -2645,9 +2645,9 @@ firewall_port_close(){
 			fi
 			
 			if [ $USE_FIREWALLD -gt 0 ]; then
-				[ ! -z "$LFWZONE" ] && firewall-cmd "--permanent" "--zone=${LFWZONE}" "--remove-port=${LPORT}/${LPROTOCOL}" >/dev/null && error_echo "Closing ${LFWZONE} for ${LPROTOCOL} port ${LPORT}"
+				[ ! -z "$LFWZONE" ] && firewall-cmd "--permanent" "--zone=${LFWZONE}" "--remove-port=${LPORT}/${LPROTOCOL}" >/dev/null && [ $VERBOSE -gt 0 ] && error_echo "Closing ${LFWZONE} for ${LPROTOCOL} port ${LPORT}"
 			else
-				[ ! -z "$LSUBNET" ] && ufw delete allow proto "${LPROTOCOL}" to any port "${LPORT}" from "$LSUBNET" >/dev/null && error_echo "Closing ${LSUBNET} for ${LPROTOCOL} port ${LPORT}"
+				[ ! -z "$LSUBNET" ] && ufw delete allow proto "${LPROTOCOL}" to any port "${LPORT}" from "$LSUBNET" >/dev/null && [ $VERBOSE -gt 0 ] && error_echo "Closing ${LSUBNET} for ${LPROTOCOL} port ${LPORT}"
 			fi
 		done
 	fi

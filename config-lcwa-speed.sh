@@ -4,7 +4,7 @@
 # Bash script for installing Andi Klein's Python LCWA PPPoE Speedtest Logger 
 # as a service on systemd, upstart & sysv systems
 ######################################################################################################
-SCRIPT_VERSION=20201206.204051
+SCRIPT_VERSION=20201208.104930
 REQINCSCRIPTVER=20200422
 
 INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
@@ -259,7 +259,7 @@ env_vars_defaults_get(){
 	[ -z "$LCWA_PRODUCT" ] 			&& LCWA_PRODUCT="$(echo "$INST_NAME" |  tr [a-z] [A-Z])"
 	[ -z "$LCWA_DESC" ] 			&& LCWA_DESC="${LCWA_PRODUCT}-TEST Logger"
 	[ -z "$LCWA_PRODUCTID" ] 		&& LCWA_PRODUCTID="f1a4af09-977c-458a-b3f7-f530fb9029c1"
-	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20201206.204051
+	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20201208.104930
 	
 	[ -z "$LCWA_USER" ] 			&& LCWA_USER="$INST_USER"
 	[ -z "$LCWA_GROUP" ] 			&& LCWA_GROUP="$INST_GROUP"
@@ -1188,7 +1188,7 @@ crontab_entry_add(){
 		PPPOE_ACCOUNT="$(grep -E '^auto.*lcwa.*$' /etc/network/interfaces | awk '{ print $2 }')"
 		if [ ! -z "$PPPOE_ACCOUNT" ]; then
 			COMMENT="#At every 10th minute, check the ${PPPOE_ACCOUNT} PPPoE connecton and reestablish it if down."
-			EVENT="*/10 * * * * /usr/local/sbin/chkppp.sh | /usr/bin/logger -t ${LCWA_SERVICE}"
+			EVENT="*/10 * * * * /usr/local/sbin/chkppp.sh | /usr/bin/logger -t lcwa-pppchk"
 
 			# Remove any old reference to chkppp.sh
 			sed -i "/^#.*${PPPOE_ACCOUNT}.*$/d" "$ROOTCRONTAB"

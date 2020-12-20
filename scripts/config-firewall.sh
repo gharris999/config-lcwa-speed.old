@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SCRIPT_VERSION=20201206.201143
+SCRIPT_VERSION=20201207.153746
 
 # Bash script to configure firewall.
 
@@ -33,20 +33,23 @@ INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
 
 . "$INCLUDE_FILE"
 
-SCRIPTNAME="$(basename "$(readlink -f "$0")")"
-SCRIPTDIR="$(dirname "$(readlink -f "$2")")"
-INST_NAME="${SCRIPTNAME%%.*}"
+SCRIPT="$(basename "$(readlink -f "$0")")"
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+INST_NAME="${SCRIPT%%.*}"
+INST_LOGFILE="/var/log/${SCRIPT}.log"
+
 
 is_root
-
 
 DEBUG=0
 VERBOSE=0
 ADD=0
 REMOVE=0
+CONFIG_NETWORK_OPTS=
 
 MINIMAL=0
 FORCE=0
+TEST=0
 MAKE_PUBLIC=0
 NO_FAILSAFE=0
 IP_ADDRESSES=
@@ -56,7 +59,9 @@ SERVICES=
 PROT=
 PORT=
 PORTPROT=
-PARAM=
+PARAMs=
+IP_ADDRESSES=
+IF_DEVS=
 
 #------------------------------------------------------------------------------
 # UDP ports to open for ALL interfaces
@@ -225,11 +230,11 @@ firewall_cmd_clear_all(){
 	local LFWZONE=
 	local LPORTS=
 	local LPORT=
-	local LPROTOCOL=
+	local LPROT=
 	local LZONE=
 	local LAPP_NAME=
 
-	error_echo "Removing firewall rules for all ports on ${LIFACE}"
+	[ $QUIET -lt 1 ] && error_echo "Removing firewall rules for all ports on ${LIFACE}"
 
 	# Will get the default zone if there's no zone tied to the LIFACE..
 	LFWZONE="$(iface_firewall_zone_get "$LIFACE")"
@@ -237,9 +242,10 @@ firewall_cmd_clear_all(){
 	LPORTS=$(firewall-cmd "--zone=${LFWZONE}" --list-ports)
 	for LPORT in $LPORTS
 	do
-		LPROTOCOL=$(basename $LPORT)
+		LPROT=$(basename $LPORT)
 		LPORT=$(dirname $LPORT)
-		iface_firewall_port_close "$LIFACE" "$LPROTOCOL" "$LPORT"
+		[ $QUIET -lt 1 ] && error_echo "Closing ${LPORT}/${LPROT} in zone ${LFWZONE}"
+		[ $TEST -lt 1 ] && firewall-cmd --zone=${LFWZONE} --remove-port=${LPORT}/${LPROT} --permanent
 	done
 
 	# Close all services too?
@@ -248,7 +254,9 @@ firewall_cmd_clear_all(){
 		do 
 			for LAPP_NAME in $(firewall-cmd --zone=${LZONE} --list-services)
 			do
-				[ ! -z "$LAPP_NAME" ] && firewall-cmd --zone=${LZONE} --remove-service=${LAPP_NAME} --permanent 
+				[ -z "$LAPP_NAME" ] && continue
+				[ $QUIET -lt 1 ] && error_echo "Closing ${LAPP_NAME} in zone ${LZONE}"
+				[ $TEST -lt 1 ] && firewall-cmd --zone=${LZONE} --remove-service=${LAPP_NAME} --permanent 
 			done
 		done
 	fi
@@ -263,7 +271,7 @@ config_firewall_default_set(){
 	local LIFACE=$(iface_primary_getb)
 	local LSUBNET=$(iface_subnet_get "$LIFACE")
 	local LFWZONE=
-	error_echo "Setting firewall to defaults.."
+	[ $QUIET -lt 1 ] && error_echo "Setting firewall to defaults.."
 	if [ $USE_FIREWALLD -gt 0 ]; then
 		# Just remove all files from /etc/firewalld/zones & reload & restart firewalld?
 		# See: https://bugzilla.redhat.com/show_bug.cgi?id=1531545
@@ -271,25 +279,25 @@ config_firewall_default_set(){
 		#~ cp /etc/firewalld/firewalld.conf /etc/firewalld/firewalld.conf.bak
 		#~ rm -f /etc/firewalld/firewalld.conf
 
-		rm -rf  /etc/firewalld/zones/*
-		firewall-cmd --reload
+		[ $TEST -lt 1 ] && rm -rf  /etc/firewalld/zones/*
+		[ $TEST -lt 1 ] && firewall-cmd --reload
 		
 		LFWZONE='public'
-		error_echo "Adding interface ${LIFACE} to zone ${LFWZONE}.."
-		firewall-cmd --permanent --zone=${LFWZONE} --add-interface=${LFWZONE} >/dev/null
+		[ $QUIET -lt 1 ] && error_echo "Adding interface ${LIFACE} to zone ${LFWZONE}.."
+		[ $TEST -lt 1 ] && firewall-cmd --permanent --zone=${LFWZONE} --add-interface=${LFWZONE} >/dev/null
 		
 		LFWZONE="$(firewall-cmd --get-default-zone)"
-		error_echo "Adding source ${LSUBNET} to zone ${LFWZONE}.."
-		firewall-cmd --zone=${LFWZONE} --change-source=${LSUBNET} --permanent >/dev/null
+		[ $QUIET -lt 1 ] && error_echo "Adding source ${LSUBNET} to zone ${LFWZONE}.."
+		[ $TEST -lt 1 ] && firewall-cmd --zone=${LFWZONE} --change-source=${LSUBNET} --permanent >/dev/null
 
 		#~ firewall-cmd --complete-reload
 	elif [ $USE_UFW -gt 0 ]; then
-		config_firewall_disable
-		ufw --force reset >/dev/null
-		ufw default deny incoming >/dev/null
-		ufw default allow outgoing >/dev/null
+		[ $TEST -lt 1 ] && config_firewall_disable
+		[ $TEST -lt 1 ] && ufw --force reset >/dev/null
+		[ $TEST -lt 1 ] && ufw default deny incoming >/dev/null
+		[ $TEST -lt 1 ] && ufw default allow outgoing >/dev/null
 	fi
-	config_firewall_enable
+	[ $TEST -lt 1 ] && config_firewall_enable
 
 }
 
@@ -307,7 +315,8 @@ config_firewall_services(){
 	# Always open the firewall for the dhcp client and for ssh..
 	for LSERVICE in bootpc ssh
 	do
-		firewall_service_open "$LSERVICE" "$LPARAMS"
+		[ $QUIET -lt 1 ] && error_echo "Opening ${LPARAMS} for ${LSERVICE%.*}"
+		[ $TEST -lt 1 ] && firewall_service_open "$LSERVICE" "$LPARAMS"
 	done
 	
 }
@@ -328,8 +337,8 @@ config_firewall_apps() {
 		if ( service_is_enabled "$LSERVICE" ); then
 		
 			if ( ! firewall_app_exists "${LSERVICE%.*}" ); then
-				[ $QUIET -lt 1 ] && error_echo "Calling " ${SCRIPTDIR}/config-firewall-prep-apps.sh --prep-only "$LSERVICE"
-				${SCRIPTDIR}/config-firewall-prep-apps.sh --prep-only "$LSERVICE"
+				[ $QUIET -lt 1 ] && error_echo "Calling " ${SCRIPT_DIR}/config-firewall-prep-apps.sh --prep-only "$LSERVICE"
+				"${SCRIPT_DIR}/config-firewall-prep-apps.sh" --prep-only "$LSERVICE"
 			fi
 		
 			# Exception for squeezelite if lms is enabled since lms already opens SlimDiscovery & SlimProto
@@ -337,7 +346,8 @@ config_firewall_apps() {
 				continue
 			fi
 		
-			firewall_app_open "${LSERVICE%.*}" "$LPARAMS"
+			[ $QUIET -lt 1 ] && error_echo "Opening ${LPARAMS} for ${LSERVICE%.*}"
+			[ $TEST -lt 1 ] && firewall_app_open "${LSERVICE%.*}" "$LPARAMS"
 		fi
 	done
 
@@ -347,17 +357,25 @@ config_firewall_ports() {
 	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
 	local LPARAMS="$1"
 	local LPARAM=
+	local LPORT=
+	local LPROT=
 
 	#~ for PORT in ${!UDP_PORTS[*]};
+	LPROT='udp'
 	for LPORT in "${UDP_PORTS[@]}"
 	do
-		[ ! -z "$LPORT" ] && firewall_port_open "udp" "$LPORT" "$LPARAMS"
+		[ -z "$LPORT" ] && continue
+		[ $QUIET -lt 1 ] && error_echo "Opening ${LPORT}/${LPROT} on ${LPARAMS}"
+		[ $TEST -lt 1 ] && firewall_port_open "udp" "$LPORT" "$LPARAMS"
 	done
 
 	#~ for PORT in ${!TCP_PORTS[*]};
+	LPROT='tcp'
 	for LPORT in "${TCP_PORTS[@]}"
 	do
-		[ ! -z "$LPORT" ] && firewall_port_open "tcp" "$LPORT" "$LPARAMS"
+		[ -z "$LPORT" ] && continue
+		[ $QUIET -lt 1 ] && error_echo "Opening ${LPORT}/${LPROT} on ${LPARAMS}"
+		[ $TEST -lt 1 ] && firewall_port_open "tcp" "$LPORT" "$LPARAMS"
 	done
 	
 	
@@ -369,6 +387,7 @@ config_firewall_iface_open_ports(){
 	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
 	local LIFACE="$1"
 	local LPORT=
+	local LPROT=
 	local LIPADDR=
 
 	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME} $@"
@@ -387,14 +406,20 @@ config_firewall_iface_open_ports(){
 		return 1
 	fi
 
+	LPROT='udp'
 	for LPORT in "${UDP_PORTS[@]}"
 	do
-		iface_firewall_open_port "$IFACE" "udp" "$LPORT"
+		[ -z "$LPORT" ] && continue
+		[ $QUIET -lt 1 ] && error_echo "Opening ${LPORT}/${LPROT} on ${LIFACE}"
+		[ $TEST -lt 1 ] && iface_firewall_open_port "$LIFACE" "udp" "$LPORT"
 	done
 
+	LPROT='tcp'
 	for LPORT in "${TCP_PORTS[@]}"
 	do
-		iface_firewall_open_port "$IFACE" "tcp" "$LPORT"
+		[ -z "$LPORT" ] && continue
+		[ $QUIET -lt 1 ] && error_echo "Opening ${LPORT}/${LPROT} on ${LIFACE}"
+		[ $TEST -lt 1 ] && iface_firewall_open_port "$LIFACE" "tcp" "$LPORT"
 	done
 
 	return 0
@@ -411,6 +436,7 @@ config_firewall_ipaddr_open_ports(){
 	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
 	local LIPADDR="$1"
 	local LPORT=
+	local LPROT=
 	
 	ipaddress_validate "$LIPADDR"
 
@@ -422,22 +448,27 @@ config_firewall_ipaddr_open_ports(){
 	fi
 
 	#~ for PORT in ${!UDP_PORTS[*]};
+	LPROT='udp'
 	for LPORT in "${UDP_PORTS[@]}"
 	do
-		ipaddr_firewall_open_port "$LIPADDR" "udp" "$LPORT"
+		[ -z "$LPORT" ] && continue
+		[ $QUIET -lt 1 ] && error_echo "Opening ${LPORT}/${LPROT} on ${LIPADDR}"
+		[ $TEST -lt 1 ] && ipaddr_firewall_open_port "$LIPADDR" "udp" "$LPORT"
 	done
 
 	#~ for PORT in ${!TCP_PORTS[*]};
+	LPROT='tcp'
 	for LPORT in "${TCP_PORTS[@]}"
 	do
-		ipaddr_firewall_open_port "$LIPADDR" "tcp" "$LPORT"
+		[ -z "$LPORT" ] && continue
+		[ $QUIET -lt 1 ] && error_echo "Opening ${LPORT}/${LPROT} on ${LIPADDR}"
+		[ $TEST -lt 1 ] && ipaddr_firewall_open_port "$LIPADDR" "tcp" "$LPORT"
 	done
 
 	return 0
 	
 	
 }
-
 
 config_firewall_add(){
 	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
@@ -455,7 +486,8 @@ config_firewall_add(){
 		return 1
 	fi
 	
-	firewall_port_open "$LPROT" "$LPORT" "$LPARAMS"
+	[ $QUIET -lt 1 ] && error_echo "Opening ${LPORT}/${LPROT} on ${LPARAMS}"
+	[ $TEST -lt 1 ] && firewall_port_open "$LPROT" "$LPORT" "$LPARAMS"
 	return 0
 }
 
@@ -475,7 +507,8 @@ config_firewall_remove(){
 		return 1
 	fi
 	
-	firewall_port_close "$LPROT" "$LPORT" "$LPARAMS"
+	[ $QUIET -lt 1 ] && error_echo "Closing ${LPORT}/${LPROT} on ${LPARAMS}"
+	[ $TEST -lt 1 ] && firewall_port_close "$LPROT" "$LPORT" "$LPARAMS"
 	return 0
 }
 
@@ -500,7 +533,7 @@ ufw_samba_fix(){
 }
 
 help_disp(){
-	error_echo "${SCRIPTNAME} [--debug] [--quiet|--verbose] [--default] [--no-failsafe] [--add udp|tcp portn] [--remove udp|tcp portn]"
+	error_echo "${SCRIPT} [--debug] [--quiet|--verbose] [--test] [--default] [--no-failsafe] [--add portn/tcp|udp] [--remove portn/tcp|udp] [ipaddr1 ipaddr2 ...] [ifdev1 ifdev2 ...]"
 }
 
 ########################################################################################
@@ -515,6 +548,10 @@ help_disp(){
 ########################################################################################
 ########################################################################################
 
+error_echo '===================================================================='
+error_echo "${SCRIPT_DIR}/${SCRIPT} ${@}"
+error_echo '===================================================================='
+
 SHORTARGS='hqvdcfpa'
 LONGARGS="help,
 quiet,
@@ -522,6 +559,7 @@ verbose,
 debug,
 default,
 force,
+test,
 clear,
 min,minimal,
 public,all-subnets,
@@ -549,24 +587,38 @@ while [ $# -gt 0 ]; do
 			help_disp
 			exit 1
 			;;
-		-q|--quiet)
-			VERBOSE=0
-			;;
-		-v|--verbose)
-			VERBOSE=1
-			;;
-		-d|--debug)
+		--debug)
 			DEBUG=1
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --debug"
+			;;
+		--verbose)
+			VERBOSE=1
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --verbose"
+			;;
+		--quiet)
+			QUIET=1
+			VERBOSE=0
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --quiet"
+			;;
+		--force)
+			FORCE=1
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --force"
+			;;
+		-t|--test)
+			TEST=1
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --test"
+			;;
+		--notest)
+			TEST=0
 			;;
 		-c|--default|--clear|--min|--minimal)
 			MINIMAL=1
-			;;
-		-f|--force)
-			FORCE=1
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --minimal"
 			;;
 		-a|-p|--public|--all-subnets)
-			# Make this apply to only specific ports / applications / services..
+			# Make this apply to only specific ports / applications / services?
 			MAKE_PUBLIC=1
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --public"
 			;;
 		--no-failsafe)
 			NO_FAILSAFE=1
@@ -615,43 +667,41 @@ done
 IP_ADDRESSES="$(echo "$IP_ADDRESSES" | xargs)"
 IF_DEVS="$(echo "$IF_DEVS" | xargs)"
 
-error_echo '===================================================================='
-error_echo "${SCRIPTNAME} ${@}"
-error_echo '===================================================================='
 [ ! -z "$IP_ADDRESSES" ] && error_echo "Configuring firewall for [${IP_ADDRESSES}]"
 [ ! -z "$IF_DEVS" ] && error_echo "Configuring firewall for [${IF_DEVS}]"
 
 
 if [ $MAKE_PUBLIC -gt 0 ]; then
-	PARAM=""
+	PARAMS=""
 else
 	if [ ! -z "$IP_ADDRESSES" ]; then
-		PARAM="$IP_ADDRESSES"
+		PARAMS="$IP_ADDRESSES"
 	elif [ ! -z "$IF_DEVS" ]; then
-		PARAM="$IF_DEVS"
+		PARAMS="$IF_DEVS"
 	else
-		PARAM=$(ifaces_get)
+		PARAMS=$(ifaces_get)
 	fi
 fi
 
 # If we're just adding or removing a port..
 if [ $ADD -gt 0 ]; then
-	config_firewall_add "$PROT" "$PORT" "$PARAM"
+	config_firewall_add "$PROT" "$PORT" "$PARAMS"
 	config_firewall_status_show $MAKE_PUBLIC
 	exit 0
 elif [ $REMOVE -gt 0 ]; then
-	config_firewall_remove "$PROT" "$PORT"  "$PARAM"
+	config_firewall_remove "$PROT" "$PORT"  "$PARAMS"
 	config_firewall_status_show $MAKE_PUBLIC
 	exit 0
 fi
 
+echo "PARAMS == ${PARAMS}"
 
-# Reset the firewall to defaults..
+# Reset the SCRIPT_DIRfirewall to defaults..
 config_firewall_default_set
 
 # Open all interfaces for bootpc & ssh
 if [ $NO_FAILSAFE -lt 1 ]; then
-	config_firewall_services "$PARAM"
+	config_firewall_services "$PARAMS"
 fi
 
 
@@ -660,10 +710,10 @@ if [ -z "$SERVICES" ]; then
 fi
 
 # Open all interfaces for our other services.
-config_firewall_apps "$SERVICES" "$PARAM"
+config_firewall_apps "$SERVICES" "$PARAMS"
 
 # Open all interfaces for our /etc/default/config-firewall defined ports
-config_firewall_ports "$PARAM"
+config_firewall_ports "$PARAMS"
 
 #Open the firewall for samba..
 [ $USE_UFW -gt 0 ] && ufw_samba_fix

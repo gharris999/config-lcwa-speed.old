@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SCRIPT_VERSION=20201206.201123
+SCRIPT_VERSION=20201207.125215
 
 # Script to check network status on boot.  Called from rc.local
 # Version 20200430.01
@@ -12,6 +12,8 @@ INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
 . "$INCLUDE_FILE"
 
 SCRIPT="$(basename "$(readlink -f "$0")")"
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+
 INST_LOGFILE="/var/log/${SCRIPT}.log"
 
 DEBUG=0
@@ -211,7 +213,7 @@ iface_dhcpsrvr_get(){
 	return 1
 }
 
-firewall_subnet_check(){
+firewall_subnet_check_old(){
 	local LIFACE="$1"
 	local IP_SUBNET="$(iface_subnet_get "$LIFACE")"
 	local FW_SUBNETS="$(sudo ufw status | grep ALLOW | awk '{print $3}' | sort | uniq | xargs)"
@@ -239,10 +241,57 @@ firewall_subnet_check(){
 	[ $VERBOSE -gt 0 ] && log_msg "Iface ${LIFACE} Subnet: '${IP_SUBNET}' does not match firewall subnet: '${FW_SUBNET}'"
 	[ $VERBOSE -gt 0 ] && log_msg "Reconfiguring firewall.."
 
-	if [ $MINIMAL -gt 0 ]; then
-		[ $TEST -lt 1 ] && config-firewall.sh --minimal
-	else
-		[ $TEST -lt 1 ] && config-firewall.sh
+	"${SCRIPT_DIR}/config-firewall.sh" $CONFIG_NETWORK_OPTS
+
+}
+
+firewall_subnet_check(){
+	local LFW_SUBNETS="$(ufw status | grep ALLOW | awk '{print $3}' | sort --unique | xargs)"
+	local LFW_SUBNET=
+	local LNEEDS_FWRECONFIG=0
+	local LIFACE="$(iface_primary_getb)"
+	local LSUBNET="$(iface_subnet_get "$LIFACE")"
+
+	# If there's no IP or link, don't attempt to change the firewall..
+	if [ -z "$LSUBNET" ]; then
+		LIFACE="$(iface_primary_get)"
+		iface_has_link "$LIFACE"
+		if [ $? -gt 0 ]; then
+			# if there is no link (e.g. ethernet not plugged in) give up immediatly without changing anything..
+			[ $VERBOSE -gt 0 ] && error_echo "Iface ${LIFACE} has no ip or link."
+			exit 0
+		fi
+	fi
+
+	# Try waiting 3 seconds three times to see if we get a dhcp lease..
+	for n in 1 2 3
+	do
+		if [ "$IP_SUBNET" = "127.0.0.0/8" ]; then
+			[ $VERBOSE -gt 0 ] && error_echo "Waiting 3 seconds for dhcp.."
+			sleep 3
+			#~ LSUBNET="$(ipaddr_subnet_get)"
+			LSUBNET="$(iface_subnet_get "$LIFACE")"
+		else
+			break
+		fi
+	done
+	
+	[ $VERBOSE -gt 0 ] && error_echo "${SCRIPT}: Checking firewall subnet against ${LIFACE} ${LSUBNET}.."
+
+	for LFW_SUBNET in $LFW_SUBNETS
+	do
+		if [ "$LFW_SUBNET" = "$LSUBNET" ] || [ "$LFW_SUBNET" = 'Anywhere' ]; then
+			[ $VERBOSE -gt 0 ] && error_echo "Iface ${LIFACE} Subnet: '${LSUBNET}' matches firewall subnet: '${LFW_SUBNET}'"
+			#~ return 0
+		else
+			[ $VERBOSE -gt 0 ] && error_echo "Iface ${LIFACE} Subnet: '${LSUBNET}' does not match firewall subnet: '${LFW_SUBNET}'"
+			LNEEDS_FWRECONFIG=1
+		fi
+	done
+
+	if [ $LNEEDS_FWRECONFIG -gt 0 ];  then
+		[ $QUIET -lt 1 ] && error_echo "Reconfiguring firewall: ${SCRIPT_DIR}/config-firewall.sh ${CONFIG_NETWORK_OPTS}"
+		"${SCRIPT_DIR}/config-firewall.sh" $CONFIG_NETWORK_OPTS
 	fi
 
 }
@@ -257,6 +306,11 @@ firewall_subnet_check(){
 ####################################################################################################
 ####################################################################################################
 ####################################################################################################
+
+error_echo '===================================================================='
+error_echo "${SCRIPT_DIR}/${SCRIPT} ${@}"
+error_echo '===================================================================='
+
 # Get cmd line args..
 
 # Process cmd line args..
@@ -279,15 +333,24 @@ while [ $# -gt 0 ]; do
 			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --debug"
 			;;
 		--verbose)
-			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --verbose"
 			VERBOSE=1
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --verbose"
 			;;
 		--quiet)
+			QUIET=1
 			VERBOSE=0
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --quiet"
 			;;
 		--force)
-			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --force"
 			FORCE=1
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --force"
+			;;
+		-t|--test)
+			TEST=1
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --test"
+			;;
+		--notest)
+			TEST=0
 			;;
 		--minimal)
 			MINIMAL=1
@@ -297,24 +360,12 @@ while [ $# -gt 0 ]; do
 			PUBLIC=1
 			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --public"
 			;;
-		--test)
-			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --test"
-			TEST=1
-			;;
-		--notest)
-			TEST=0
-			;;
 		*)
 			log_msg "${SCRIPT}: Unknown arg ${1}"
 			;;
 	esac
 	shift
 done
-
-
-#~ [ $DEBUG -gt 0 ] && log_msg "${SCRIPT} $@  -- line ${LINENO}"
-[ $VERBOSE -gt 0 ] && log_msg "################################################################################################################################"
-[ $VERBOSE -gt 0 ] && log_msg "${SCRIPT}: Checking network connectivity.."
 
 # Checknet workflow:
 
@@ -368,12 +419,9 @@ do
 
 		[ $VERBOSE -gt 0 ] && log_msg "================================================================================================================================"
 		[ $VERBOSE -gt 0 ] && log_msg "Reconfiguring static network address for ${NETDEV} from ${OLD_IP} to ${NEW_IP} suggested by dhcp server ${DHCP_SERVER}.."
-		[ $VERBOSE -gt 0 ] && log_msg "/usr/local/sbin/config-network.sh --testping --quiet --primary-only \"--iface0=${NETDEV}\" \"--ip0=${NEW_IP}" 2>&1 | tee -a "$INST_LOGFILE"
-		if [ $TEST -lt 1 ] || [ $FORCE -gt 0 ]; then
-			/usr/local/sbin/config-network.sh --testping --quiet $CONFIG_NETWORK_OPTS --primary-only "--iface0=${NETDEV}" "--ip0=${NEW_IP}"
-		else
-			echo /usr/local/sbin/config-network.sh --testping --quiet $CONFIG_NETWORK_OPTS --primary-only "--iface0=${NETDEV}" "--ip0=${NEW_IP}"
-		fi
+		[ $VERBOSE -gt 0 ] && log_msg "${SCRIPT_DIR}/config-network.sh --testping --quiet ${CONFIG_NETWORK_OPTS} --primary-only \"--iface0=${NETDEV}\" \"--ip0=${NEW_IP}" 2>&1 | tee -a "$INST_LOGFILE"
+
+		"${SCRIPT_DIR}/config-network.sh" --testping --quiet $CONFIG_NETWORK_OPTS --primary-only "--iface0=${NETDEV}" "--ip0=${NEW_IP}"
 
 		if [ $? -eq 0 ]; then
 			[ $VERBOSE -gt 0 ] && log_msg "Reconfiguration successful."
@@ -398,14 +446,13 @@ do
 		NEW_IP="${NEW_SUBNET%.*}.$(default_octet_get)"
 
 		if [ "$NEW_IP" != "$OLD_IP" ]; then
-		[ $VERBOSE -gt 0 ] && log_msg "================================================================================================================================"
+			[ $VERBOSE -gt 0 ] && log_msg "================================================================================================================================"
 			[ $VERBOSE -gt 0 ] && log_msg "Attempting reconfigure of static network address for ${NETDEV} from ${OLD_IP} to ${NEW_IP} on default subnet ${NEW_SUBNET}.."
 			[ $VERBOSE -gt 0 ] && log_msg "/usr/local/sbin/config-network.sh --testping --quiet --primary-only ${CONFIG_NETWORK_OPTS} \"--iface==${NETDEV}\" \"--addr=${NEW_IP}" | tee -a "$INST_LOGFILE"
-				if [ $TEST -lt 1 ] || [ $FORCE -gt 0 ]; then
-					/usr/local/sbin/config-network.sh --testping --quiet $CONFIG_NETWORK_OPTS --primary-only $CONFIG_NETWORK_OPTS "--iface=${NETDEV}" "--addr=${NEW_IP}"
-				else
-					echo /usr/local/sbin/config-network.sh --testping --quiet $CONFIG_NETWORK_OPTS --primary-only $CONFIG_NETWORK_OPTS "--iface=${NETDEV}" "--addr=${NEW_IP}"
-				fi
+
+			[ $QUIET -lt 1 ] && error_echo "Reconfiguring network: ${SCRIPT_DIR}/config-network.sh  --testping --quiet --primary-only --iface=${NETDEV} --addr=${NEW_IP} ${CONFIG_NETWORK_OPTS }"
+
+			"${SCRIPT_DIR}/config-network.sh"  --testping --quiet --primary-only "--iface=${NETDEV}" "--addr=${NEW_IP}" $CONFIG_NETWORK_OPTS 
 
 			if [ $? -eq 0 ]; then
 				[ $VERBOSE -gt 0 ] && log_msg "Network reconfiguration of ${NETDEV} to ${NEW_IP} SUCCESSFUL."

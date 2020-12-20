@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SCRIPT_VERSION=20201206.201152
+SCRIPT_VERSION=20201207.141228
 
 # Script to check network status on boot.  Called from rc.local
 #
@@ -12,6 +12,8 @@ INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
 . "$INCLUDE_FILE"
 
 SCRIPT="$(basename "$(readlink -f "$0")")"
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+INST_LOGFILE="/var/log/${SCRIPT}.log"
 
 DEBUG=0
 VERBOSE=0
@@ -19,7 +21,25 @@ FORCE=0
 TEST=0
 MINIMAL=0
 PUBLIC=0
-CONFIG_FIREWALL_OPTS=
+CONFIG_NETWORK_OPTS=
+
+
+######################################################################################################
+# error_echo() -- echo a message to stderr
+######################################################################################################
+error_echo(){
+	echo "$@" 1>&2;
+}
+
+error_log(){
+	echo "${SCRIPT} $(timestamp_get_iso8601) " "$@" >>"$INST_LOGFILE"
+}
+
+log_msg(){
+	error_echo "$@"
+	error_log "$@"
+}
+
 
 ########################################################################################
 # get_links_wait( $NETDEV) Tests to see if an interface is linked. returns 0 == linked; 1 == no link;
@@ -74,15 +94,14 @@ trim(){
 }
 
 firewall_subnet_check(){
-	local FW_SUBNETS="$(sudo ufw status | grep ALLOW | awk '{print $3}' | sort | uniq | xargs)"
-	local FW_SUBNET=
+	local LFW_SUBNETS="$(ufw status | grep ALLOW | awk '{print $3}' | sort --unique | xargs)"
+	local LFW_SUBNET=
+	local LNEEDS_FWRECONFIG=0
 	local LIFACE="$(iface_primary_getb)"
-	local IP_SUBNET="$(iface_subnet_get "$LIFACE")"
-
-	[ $VERBOSE -gt 0 ] && error_echo "${SCRIPT}: Checking firewall subnet against ${LIFACE} ${IP_SUBNET}.."
+	local LSUBNET="$(iface_subnet_get "$LIFACE")"
 
 	# If there's no IP or link, don't attempt to change the firewall..
-	if [ -z "$IP_SUBNET" ]; then
+	if [ -z "$LSUBNET" ]; then
 		LIFACE="$(iface_primary_get)"
 		iface_has_link "$LIFACE"
 		if [ $? -gt 0 ]; then
@@ -92,31 +111,36 @@ firewall_subnet_check(){
 		fi
 	fi
 
-	# Check to see if we have dhcp..
+	# Try waiting 3 seconds three times to see if we get a dhcp lease..
 	for n in 1 2 3
 	do
 		if [ "$IP_SUBNET" = "127.0.0.0/8" ]; then
 			[ $VERBOSE -gt 0 ] && error_echo "Waiting 3 seconds for dhcp.."
 			sleep 3
-			IP_SUBNET="$(ipaddr_subnet_get)"
+			#~ LSUBNET="$(ipaddr_subnet_get)"
+			LSUBNET="$(iface_subnet_get "$LIFACE")"
 		else
 			break
 		fi
 	done
+	
+	[ $VERBOSE -gt 0 ] && error_echo "${SCRIPT}: Checking firewall subnet against ${LIFACE} ${LSUBNET}.."
 
-	for FW_SUBNET in $FW_SUBNETS
+	for LFW_SUBNET in $LFW_SUBNETS
 	do
-		if [ "$FW_SUBNET" = "$IP_SUBNET" ] || [ "$FW_SUBNET" = 'Anywhere' ]; then
-			[ $VERBOSE -gt 0 ] && error_echo "Iface ${LIFACE} Subnet: '${IP_SUBNET}' matches firewall subnet: '${FW_SUBNET}'"
-			return 0
+		if [ "$LFW_SUBNET" = "$LSUBNET" ] || [ "$LFW_SUBNET" = 'Anywhere' ]; then
+			[ $VERBOSE -gt 0 ] && error_echo "Iface ${LIFACE} Subnet: '${LSUBNET}' matches firewall subnet: '${LFW_SUBNET}'"
+			#~ return 0
+		else
+			[ $VERBOSE -gt 0 ] && error_echo "Iface ${LIFACE} Subnet: '${LSUBNET}' does not match firewall subnet: '${LFW_SUBNET}'"
+			LNEEDS_FWRECONFIG=1
 		fi
 	done
 
-
-	[ $VERBOSE -gt 0 ] && error_echo "Iface ${LIFACE} Subnet: '${IP_SUBNET}' does not match firewall subnet: '${FW_SUBNET}'"
-	[ $VERBOSE -gt 0 ] && error_echo "Reconfiguring firewall.."
-
-	[ $TEST -lt 1 ] || [ $FORCE -gt 0 ] && config-firewall.sh $CONFIG_FIREWALL_OPTS
+	if [ $LNEEDS_FWRECONFIG -gt 0 ];  then
+		[ $QUIET -lt 1 ] && error_echo "Reconfiguring firewall: ${SCRIPT_DIR}/config-firewall.sh ${CONFIG_NETWORK_OPTS}"
+		"${SCRIPT_DIR}/config-firewall.sh" $CONFIG_NETWORK_OPTS
+	fi
 
 }
 
@@ -130,6 +154,11 @@ firewall_subnet_check(){
 ####################################################################################################
 ####################################################################################################
 ####################################################################################################
+
+error_echo '===================================================================='
+error_echo "${SCRIPT_DIR}/${SCRIPT} ${@}"
+error_echo '===================================================================='
+
 # Get cmd line args..
 
 # Process cmd line args..
@@ -148,34 +177,37 @@ while [ $# -gt 0 ]; do
 			#echo "Syntax: $(basename "$0") [--debug] [--test] [--verbose] [--quiet] [--minimal]"
 			exit 0
 			;;
-		-d|--debug)
+		--debug)
 			DEBUG=1
-			CONFIG_FIREWALL_OPTS="${CONFIG_FIREWALL_OPTS} --debug"
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --debug"
 			;;
-		-v|--verbose)
-			CONFIG_FIREWALL_OPTS="${CONFIG_FIREWALL_OPTS} --verbose"
+		--verbose)
 			VERBOSE=1
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --verbose"
 			;;
-		-q|--quiet)
+		--quiet)
+			QUIET=1
 			VERBOSE=0
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --quiet"
 			;;
 		--force)
 			FORCE=1
-			;;
-		-m|--minimal)
-			MINIMAL=1
-			CONFIG_FIREWALL_OPTS="${CONFIG_FIREWALL_OPTS} --minimal"
-			;;
-		-p|--public)
-			PUBLIC=1
-			CONFIG_FIREWALL_OPTS="${CONFIG_FIREWALL_OPTS} --public"
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --force"
 			;;
 		-t|--test)
-			CONFIG_FIREWALL_OPTS="${CONFIG_FIREWALL_OPTS} --test"
 			TEST=1
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --test"
 			;;
 		--notest)
 			TEST=0
+			;;
+		-m|--minimal)
+			MINIMAL=1
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --minimal"
+			;;
+		-p|--public)
+			PUBLIC=1
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --public"
 			;;
 		*)
 			error_echo "${SCRIPT}: Unknown arg ${1}"
@@ -183,7 +215,6 @@ while [ $# -gt 0 ]; do
 	esac
 	shift
 done
-
 
 firewall_subnet_check
 

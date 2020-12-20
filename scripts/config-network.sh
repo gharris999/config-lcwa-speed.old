@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SCRIPT_VERSION=20201206.201102
+SCRIPT_VERSION=20201208.105448
 
 # Bash script to configure default NIC to a static IP address..
 
@@ -58,6 +58,9 @@ INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
 . "$INCLUDE_FILE"
 
 SCRIPT="$(readlink -f "$0")"
+SCRIPT_DIR="$(dirname "$(readlink -f "$0")")"
+INST_LOGFILE="/var/log/${SCRIPT}.log"
+
 
 #~ IS_FEDORA="$(which firewall-cmd 2>/dev/null | wc -l)"
 #~ IS_NETPLAN="$(which netplan 2>/dev/null | wc -l)"
@@ -73,6 +76,8 @@ FAKE=0
 NETPLAN_TRY=0
 UPDATE_YQ=0
 NO_PAUSE=0
+CONFIG_NETWORK_OPTS=
+
 
 # MULTI_NICS=1: Default to detecting primary & secondary NICs
 MULTI_NICS=1
@@ -1472,6 +1477,10 @@ minidlna_fix(){
 ########################################################################################
 ########################################################################################
 
+error_echo '===================================================================='
+error_echo "${SCRIPT_DIR}/${SCRIPT} ${@}"
+error_echo '===================================================================='
+
 # cmd line args...
 # --iface
 # --ip
@@ -1527,26 +1536,36 @@ while [ $# -gt 0 ]; do
 			echo "${SCRIPTNAME} [--primary-only] [--netcfg-only] [--iface0=net_device] [--ip0=ip_address|dhcp] [--iface1=net_device] [--ip1=ip_address|dhcp] [--ssid=wifi-ssid] [--wpa-psk=wifi-passkey] [--firewall-iface=devname]"
 			exit 0
 			;;
-		-d|--debug)
+		--debug)
 			DEBUG=1
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --debug"
 			;;
-		-q|--quiet)
-			QUIET=1;
-			VERBOSE=0;
+		--verbose)
+			VERBOSE=1
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --verbose"
 			;;
-		-v|--verbose)
-			QUIET=0;
+		--quiet)
+			QUIET=1
+			VERBOSE=0
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --quiet"
+			;;
+		--force)
+			FORCE=1
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --force"
+			;;
+		-t|--test|--fake)
 			VERBOSE=1;
+			FAKE=1;
+			TEST=1
+			CONFIG_NETWORK_OPTS="${CONFIG_NETWORK_OPTS} --test"
+			;;
+		--notest)
+			TEST=0
 			;;
 		--logfile)
 			shift
 			INST_LOGFILE="$1"
 			LOG=1
-			;;
-			
-		-t|--test|--fake)
-			VERBOSE=1;
-			FAKE=1;
 			;;
 		--testping)
 			TESTPING=1
@@ -1617,7 +1636,7 @@ while [ $# -gt 0 ]; do
 		*)
 			# is this a valid interface name?
 			#~ is_iface "$1"
-			iface_validate "$1"
+			iface_is_valid "$1"
 			if [ $? -lt 1 ]; then
 				if [ -z "$NETDEV0" ]; then
 					NETDEV0="$1"
@@ -1628,7 +1647,7 @@ while [ $# -gt 0 ]; do
 			else
 				# OK, then see if this is a valid IP address..
 				#~ valid_ip "$1"
-				ipaddress_validate "$1"
+				ipaddr_is_valid "$1"
 				if [ $? -lt 1 ]; then
 					if [ -z "$IPADDR0" ]; then
 						IPADDR0="$1"
@@ -1670,7 +1689,7 @@ fi
 
 # Primary network interface...check or fetch device names
 if [ ! -z "$NETDEV0" ]; then
-	iface_validate "$NETDEV0"
+	iface_is_valid "$NETDEV0"
 	if [ $? -gt 0 ]; then
 		error_echo "Error: network interface ${NETDEV0} does not exist.."
 		exit 1
@@ -1710,7 +1729,7 @@ error_echo "Setting primary interface ${NETDEV0} to ${IPADDR0}."
 if [ $MULTI_NICS -gt 0 ]; then
 
 	if [ ! -z "$NETDEV1" ]; then
-		iface_validate "$NETDEV1"
+		iface_is_valid "$NETDEV1"
 		if [ $? -gt 0 ]; then
 			error_echo "Error: network interface ${NETDEV1} does not exist.."
 			# Ignore the error and continue so the primary iface is configured..
@@ -1871,10 +1890,10 @@ if [ $NETCFG_ONLY -lt 1 ]; then
 	
 	if [ ! -z "$FIREWALL_IFACE" ]; then
 		[ $QUIET -lt 1 ] && error_echo "Configuring firewall for ${FW_ARGS} ${FIREWALL_IFACE}"
-		config-firewall.sh $FW_ARGS "$FIREWALL_IFACE"
+		"${SCRIPT_DIR}/config-firewall.sh" $CONFIG_NETWORK_OPTS $FW_ARGS "$FIREWALL_IFACE"
 	else
 		[ $QUIET -lt 1 ] && error_echo "Configuring firewall for ${FW_ARGS} ${IPADDR0} ${IPADDR1}"
-		config-firewall.sh $FW_ARGS "$IPADDR0" "$IPADDR1"
+		"${SCRIPT_DIR}/config-firewall.sh" $CONFIG_NETWORK_OPTS $FW_ARGS "$IPADDR0" "$IPADDR1"
 	fi
 fi
 
