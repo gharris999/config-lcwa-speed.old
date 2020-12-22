@@ -2,7 +2,7 @@
 # lcwa-speed-update.sh -- script to update lcwa-speed git repo and restart service..
 # Version Control for this script
 
-SCRIPT_VERSION=20201222.124912
+SCRIPT_VERSION=20201222.125732
 
 INST_NAME='lcwa-speed'
 
@@ -342,10 +342,49 @@ git_check_up_to_date(){
 	fi
 }
 
+######################################################################################################
+# utility_scripts_install( SUP_REPO_SCRIPT_DIR ) Installs the utility scripts to /usr/local/sbin
+######################################################################################################
+utility_scripts_install(){
+	local LSCRIPT_DIR="$1"
+	local LTARGET_DIR='/usr/local/sbin'
+	local LSCRIPT=
+	local LSOURCE=
+	local LTARGET=
+	
+	for LSCRIPT in '../instsrv_functions.sh' $(ls -1 "${LSCRIPT_DIR}/" )
+	do
+		if [ "$LSCRIPT" = 'getscripts.sh' ] || [ "$LSCRIPT" = 'makelinks.sh' ]; then
+			continue
+		fi
+		
+		LSOURCE="${LSCRIPT_DIR}/${LSCRIPT}"
+		LTARGET="${LTARGET_DIR}/${LSCRIPT}"
+		
+		if [ -f "$LSOURCE" ]; then
+			if [ "$SOURCE" -nt "$TARGET" ]; then
+				# Test the script for errors
+				bash -n "$LSOURCE"
+				if [ $? -gt 0 ]; then
+					error_echo '============================================================='
+					error_echo "Error: bash says that ${LSOURCE} has errors!!!"
+					error_echo '============================================================='
+				else
+					error_echo "Copying ${LSOURCE} to ${LTARGET}"
+					[ $TEST -lt 1 ] && cp -p "$LSOURCE" "$LTARGET"
+				fi
+			fi
+		fi
+	
+	done
+	
+}
+
+
 service_update_check(){
 	local LLOCAL_REPO="$1"
 	local LINSTALL_XML="${LLOCAL_REPO}/install.xml"
-	local LREPO_VERSION=20201222.124912
+	local LREPO_VERSION=20201222.125732
 	local LREPO_EPOCH=
 	local LLCWA_EPOCH=
 	
@@ -357,7 +396,7 @@ service_update_check(){
 	log_msg "Checking ${LLOCAL_REPO}/install.xml to see if an update of the ${INST_NAME} service is required."
 	
 	#~ <version>20200511.232252</version>
-	LREPO_VERSION=20201222.124912
+	LREPO_VERSION=20201222.125732
 	
 	if [ $DEBUG -gt 0 ]; then
 		LREPO_EPOCH="$(echo "$LREPO_VERSION" | sed -e 's/\./ /g' | sed -e 's/\([0-9]\{8\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1 \2:\3:\4/')"
@@ -378,6 +417,9 @@ service_update_check(){
 	
 	# If the repo version is greater than our version..
 	if [[ "$LREPO_VERSION" > "$LCWA_VERSION" ]]; then
+		# Install updated utility scripts..
+		# Redundant??
+		#~ utility_scripts_install "${LLOCAL_REPO}/scripts"
 		# Update the service
 		log_msg "Updating installed ${INST_NAME} service version ${LCWA_VERSION} to new version ${LREPO_VERSION} from ${LLOCAL_REPO}/config-${INST_NAME}.sh"
 		[ $TEST_ONLY -lt 1 ] && "${LLOCAL_REPO}/config-${INST_NAME}.sh" --update
