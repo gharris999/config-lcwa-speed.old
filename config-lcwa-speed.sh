@@ -4,7 +4,7 @@
 # Bash script for installing Andi Klein's Python LCWA PPPoE Speedtest Logger 
 # as a service on systemd, upstart & sysv systems
 ######################################################################################################
-SCRIPT_VERSION=20201208.104930
+SCRIPT_VERSION=20201222.123808
 REQINCSCRIPTVER=20200422
 
 INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
@@ -111,7 +111,7 @@ HOSTNAME=$(hostname | tr [a-z] [A-Z])
 #~ LCWA_PRODUCT="$INST_PROD"
 #~ LCWA_DESC="$INST_DESC"
 #~ LCWA_PRODUCTID="f1a4af09-977c-458a-b3f7-f530fb9029c1"				# Random GUID..
-#~ LCWA_VERSION="YYYYMMDD.HHMMSS"										# Set at 
+#~ LCWA_VERSION=20201222.123808
 
 # User account and group under which the service will run..
 #~ LCWA_USER="$INST_USER"
@@ -165,7 +165,7 @@ LCWA_SERVICE=
 LCWA_PRODUCT=
 LCWA_DESC=
 LCWA_PRODUCTID=
-LCWA_VERSION=
+LCWA_VERSION=20201222.123808
 
 LCWA_USER=
 LCWA_GROUP=
@@ -259,7 +259,7 @@ env_vars_defaults_get(){
 	[ -z "$LCWA_PRODUCT" ] 			&& LCWA_PRODUCT="$(echo "$INST_NAME" |  tr [a-z] [A-Z])"
 	[ -z "$LCWA_DESC" ] 			&& LCWA_DESC="${LCWA_PRODUCT}-TEST Logger"
 	[ -z "$LCWA_PRODUCTID" ] 		&& LCWA_PRODUCTID="f1a4af09-977c-458a-b3f7-f530fb9029c1"
-	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20201208.104930
+	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20201222.123808
 	
 	[ -z "$LCWA_USER" ] 			&& LCWA_USER="$INST_USER"
 	[ -z "$LCWA_GROUP" ] 			&& LCWA_GROUP="$INST_GROUP"
@@ -1076,89 +1076,61 @@ git_repo_remove(){
 	fi
 }
 
-
 ######################################################################################################
-# lcwa_debug_script_create() Create the startup debugging script..
+# utility_scripts_install( SUP_REPO_SCRIPT_DIR ) Installs the utility scripts to /usr/local/sbin
 ######################################################################################################
-script_debug_install(){
+utility_scripts_install(){
+	local LSCRIPT_DIR="$1"
+	local LTARGET_DIR='/usr/local/sbin'
+	local LSCRIPT=
+	local LSOURCE=
+	local LTARGET=
 	
-	local LLOCAL_DEBUG_SCRIPT="/usr/local/sbin/${INST_NAME}-debug.sh"
-	
-	# Copy
-	if [ -f "$LCWA_DEBUG_SCRIPT" ]; then
-		cp -pf "${LCWA_LOCALSUPREPO}/instsrv_functions.sh" /usr/local/sbin
-		cp -pf "$LCWA_DEBUG_SCRIPT" "$LLOCAL_DEBUG_SCRIPT"
-		chmod 755 "$LLOCAL_DEBUG_SCRIPT"
-		touch "--reference=${LCWA_DEBUG_SCRIPT}" "$LLOCAL_DEBUG_SCRIPT"
-	elif [ -f "${SCRIPT_DIR}/scripts/${INST_NAME}-debug.sh" ]; then
-		cp -pf "${SCRIPT_DIR}/instsrv_functions.sh" /usr/local/sbin
-		cp -pf "${SCRIPT_DIR}/scripts/${INST_NAME}-debug.sh" "$LLOCAL_DEBUG_SCRIPT"
-		chmod 755 "$LLOCAL_DEBUG_SCRIPT"
-		touch "--reference=${SCRIPT_DIR}/scripts/${INST_NAME}-debug.sh" "$LLOCAL_DEBUG_SCRIPT"
-	fi
-
-	if [ ! -f "$LLOCAL_DEBUG_SCRIPT" ]; then
-		error_echo "Error: could not install ${LLOCAL_DEBUG_SCRIPT}"
-		return 1
-	fi
-	
-	error_echo "${LLOCAL_DEBUG_SCRIPT} installed.."
-
-	return 0
-}
-
-######################################################################################################
-# lcwa_debug_script_remove() Remove the startup debugging script..
-######################################################################################################
-script_debug_remove(){
-	local LLOCAL_DEBUG_SCRIPT="/usr/local/sbin/${INST_NAME}-debug.sh"
-	if [ -f "$LLOCAL_DEBUG_SCRIPT" ]; then
-		error_echo "Removing ${LLOCAL_DEBUG_SCRIPT}.."
-		rm "$LLOCAL_DEBUG_SCRIPT"
-	fi
-
-}
-
-######################################################################################################
-# script_update_install() Install the git/svn update and other utility scripts..
-######################################################################################################
-script_update_install(){
-	local LLOCAL_UPDATE_SCRIPT="/usr/local/sbin/${INST_NAME}-update.sh"
-	local LSCRIPT_FILE=
-	
-	# Are we running from a repo?
-	if [ -d "${SCRIPT_DIR}/scripts" ]; then
-	
-		cp -pf "${SCRIPT_DIR}/instsrv_functions.sh" "/usr/local/sbin/instsrv_functions.sh"
+	for LSCRIPT in '../instsrv_functions.sh' $(ls -1 "${LSCRIPT_DIR}/" )
+	do
+		if [ "$LSCRIPT" = 'getscripts.sh' ] || [ "$LSCRIPT" = 'makelinks.sh' ]; then
+			continue
+		fi
 		
-		for LSCRIPT_FILE in $(ls -1 "${SCRIPT_DIR}/scripts" )
-		do	
-			error_echo "Installing ${LSCRIPT_FILE} to /usr/local/sbin"
-			cp -pf "${SCRIPT_DIR}/scripts/${LSCRIPT_FILE}" "/usr/local/sbin/${LSCRIPT_FILE}"
-			chmod 755 "/usr/local/sbin/${LSCRIPT_FILE}"
-		done
+		LSOURCE="${LSCRIPT_DIR}/${LSCRIPT}"
+		LTARGET="${LTARGET_DIR}/${LSCRIPT}"
 		
-	fi
-
-	if [ ! -f "$LLOCAL_UPDATE_SCRIPT" ]; then
-		error_echo "Error: could not install ${LLOCAL_UPDATE_SCRIPT}"
-		return 1
-	fi
+		if [ -f "$LSOURCE" ]; then
+			if [ "$SOURCE" -nt "$TARGET" ]; then
+				# Test the script for errors
+				bash -n "$LSOURCE"
+				if [ $? -gt 0 ]; then
+					error_echo '============================================================='
+					error_echo "Error: bash says that ${LSOURCE} has errors!!!"
+					error_echo '============================================================='
+				else
+					error_echo "Copying ${LSOURCE} to ${LTARGET}"
+					[ $TEST -lt 1 ] && cp -p "$LSOURCE" "$LTARGET"
+				fi
+			fi
+		fi
 	
-	error_echo "${LLOCAL_UPDATE_SCRIPT} installed.."
-
+	done
+	
 }
 
 ######################################################################################################
-# script_update_remove() Remove the git/svn update script..
+# utility_scripts_remove() Removes the utility scripts from /usr/local/sbin
 ######################################################################################################
-script_update_remove(){
-	local LLOCAL_UPDATE_SCRIPT="/usr/local/sbin/${INST_NAME}-update.sh"
-	if [ -f "$LLOCAL_UPDATE_SCRIPT" ]; then
-		error_echo "Removing ${LLOCAL_UPDATE_SCRIPT}.."
-		rm "$LLOCAL_UPDATE_SCRIPT"
-	fi
-
+utility_scripts_remove(){
+	local LTARGET_DIR='/usr/local/sbin'
+	local LSCRIPT=
+	local LTARGET=
+	
+	for LSCRIPT in getscripts.sh lcwa-speed-debug.sh lcwa-speed-update.sh log-proc-net-dev.sh makelinks.sh
+	do
+		LTARGET="${LTARGET_DIR}/${LSCRIPT}"
+		if [ -f "$LTARGET" ]; then
+			error_echo "Removing ${LTARGET}"
+			rm -f "$LTARGET"
+		fi
+	done
+	
 }
 
 crontab_entry_add(){
@@ -2117,10 +2089,6 @@ elif [ $UPDATE -gt 0 ]; then
 		service_create "$LCWA_EXEC_ARGS"
 	fi
 	
-	# Install the startup debugging & update scripts
-	script_debug_install
-	script_update_install
-	
 	HOME="$CUR_HOME"
 
 	# Configure root crontab to update the git repo and restart the service at 12:05 am..
@@ -2135,6 +2103,12 @@ elif [ $UPDATE -gt 0 ]; then
 	service_enable
 	service_start
 	service_status
+
+	# Update the startup debugging, update and other utiltiy scripts..
+	utility_scripts_install "${LCWA_LOCALSUPREPO}/scripts"
+
+	echo "${INST_NAME} is updated."
+	exit 0
 
 ########################################################################################
 # UNINSTALL
@@ -2163,9 +2137,6 @@ elif [ $UNINSTALL -gt 0 ]; then
 	service_remove
 	sysv_init_file_remove
 
-	script_debug_remove
-	script_update_remove
-	
 	log_rotate_script_remove "$LCWA_LOGFILE"
 	log_rotate_script_remove "$LCWA_ERRFILE"
 	log_rotate_script_remove "$LCWA_VCLOG"
@@ -2178,7 +2149,6 @@ elif [ $UNINSTALL -gt 0 ]; then
 	if [ $KEEPLOCALREPO -lt 1 ]; then
 		git_repo_remove "$LCWA_LOCALREPO"
 		git_repo_remove "$LCWA_LOCALSUPREPO"
-		#~ inst_dir_remove "$LCWA_LOCALREPO"
 	fi
 
 	# Remove the local data..
@@ -2192,9 +2162,12 @@ elif [ $UNINSTALL -gt 0 ]; then
 		python_libs_remove
 		pkg_deps_remove
 	fi
+	
+	# Remove the utility scripts last (since this running script might be one of them).
+	utility_scripts_remove
 
 	echo "${INST_NAME} is uninstalled."
-	exit 1
+	exit 0
 
 ########################################################################################
 # INSTALL
@@ -2279,9 +2252,8 @@ else
 		service_create "$LCWA_EXEC_ARGS"
 	fi
 
-	# Install the startup debugging & update scripts
-	script_debug_install
-	script_update_install
+	# Install the startup debugging, update and other utiltiy scripts..
+	utility_scripts_install "${LCWA_LOCALSUPREPO}/scripts"
 
 	# Create the service control links..
 	service_enable
