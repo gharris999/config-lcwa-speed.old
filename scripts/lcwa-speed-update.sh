@@ -2,7 +2,7 @@
 # lcwa-speed-update.sh -- script to update lcwa-speed git repo and restart service..
 # Version Control for this script
 
-SCRIPT_VERSION=20201207.092648
+SCRIPT_VERSION=20201222.124912
 
 INST_NAME='lcwa-speed'
 
@@ -342,10 +342,10 @@ git_check_up_to_date(){
 	fi
 }
 
-script_update_check(){
+service_update_check(){
 	local LLOCAL_REPO="$1"
 	local LINSTALL_XML="${LLOCAL_REPO}/install.xml"
-	local LREPO_VERSION=
+	local LREPO_VERSION=20201222.124912
 	local LREPO_EPOCH=
 	local LLCWA_EPOCH=
 	
@@ -357,7 +357,7 @@ script_update_check(){
 	log_msg "Checking ${LLOCAL_REPO}/install.xml to see if an update of the ${INST_NAME} service is required."
 	
 	#~ <version>20200511.232252</version>
-	LREPO_VERSION="$(grep -E '<version>[0-9]{8}\.[0-9]{6}</version>' "$LINSTALL_XML" | sed -n -e 's/^.*\([0-9]\{8\}\.[0-9]\{6\}\).*$/\1/p')"
+	LREPO_VERSION=20201222.124912
 	
 	if [ $DEBUG -gt 0 ]; then
 		LREPO_EPOCH="$(echo "$LREPO_VERSION" | sed -e 's/\./ /g' | sed -e 's/\([0-9]\{8\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1 \2:\3:\4/')"
@@ -379,7 +379,7 @@ script_update_check(){
 	# If the repo version is greater than our version..
 	if [[ "$LREPO_VERSION" > "$LCWA_VERSION" ]]; then
 		# Update the service
-		log_msg "Updating installed ${INST_NAME} service version ${LCWA_VERSION} to new version ${LREPO_VERSION} from ${LLOCAL_REPO}config-${INST_NAME}.sh"
+		log_msg "Updating installed ${INST_NAME} service version ${LCWA_VERSION} to new version ${LREPO_VERSION} from ${LLOCAL_REPO}/config-${INST_NAME}.sh"
 		[ $TEST_ONLY -lt 1 ] && "${LLOCAL_REPO}/config-${INST_NAME}.sh" --update
 	fi
 	
@@ -461,7 +461,7 @@ git_check_up_to_date "$LCWA_LOCALSUPREPO"
 
 # Service version is: $LCWA_VERSION
 # See if we need to update the service installation
-script_update_check "$LCWA_LOCALSUPREPO"
+service_update_check "$LCWA_LOCALSUPREPO"
 
 # See if we need to update this update script..
 if [ $SERVICES_UPDATE -gt 0 ]; then
