@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SCRIPT_VERSION=20201208.105448
+SCRIPT_VERSION=20201221.115422
 
 # Bash script to configure default NIC to a static IP address..
 
@@ -463,7 +463,10 @@ yq_install(){
 		rm -f "${TMPDIR}/index.html"
 	fi
 
-	YQ_INDEX='https://github.com/mikefarah/yq/releases/latest/'
+	# YQ 4.x too broken to use thus far!!!
+	#~ YQ_INDEX='https://github.com/mikefarah/yq/releases/latest/'
+	YQ_INDEX='https://github.com/mikefarah/yq/releases/tag/3.4.1/'
+	
 	wget -q "$YQ_INDEX"
 	
 	if [ ! -f "${TMPDIR}/index.html" ]; then
@@ -493,8 +496,8 @@ yq_install(){
 	YQ="$(which yq)"
 	
 	if [ ! -z "$YQ" ]; then
-		YQ_REMOTE_VERSION="$(echo $YQ_BIN_URL | sed -n -e 's#^.*/\([0123456789\.]\+\)/.*$#\1#p')"
-		YQ_LOCAL_VERSION="$("$YQ" -V | sed -n -e 's/^.*version \(.*\)$/\1/p')"
+		YQ_REMOTE_VERSION=20201221.115422
+		YQ_LOCAL_VERSION=20201221.115422
 		
 		if [[ ! "$YQ_REMOTE_VERSION" < "$YQ_LOCAL_VERSION" ]]; then
 			error_echo "${YQ}, version ${YQ_LOCAL_VERSION} is up to date with remote version ${YQ_REMOTE_VERSION}."
@@ -668,6 +671,18 @@ ubuntu_netplan_cfg_write(){
 		error_echo "Error: Could not install yq.  ${SCRIPTNAME} must exit."
 		exit 1
 	fi
+	
+	#########################################################################
+	#########################################################################
+	#########################################################################
+	#########################################################################
+	# Work out differences between version 3 & version 4!!!
+	local YQ_VER=$($YQ -V yq -V | sed -r 's/^([^.]+).*$/\1/; s/^[^0-9]*([0-9]+).*$/\1/')
+	#########################################################################
+	#########################################################################
+	#########################################################################
+	#########################################################################
+	
 
 	# Search for our network yaml file 1 level deep
 	LCONF_FILE="$(ubuntu_netplan_cfg_find)"
@@ -871,6 +886,17 @@ ubuntu_netplan_failsafe_write(){
 		exit 1
 	fi
 
+	#########################################################################
+	#########################################################################
+	#########################################################################
+	#########################################################################
+	# Work out differences between version 3 & version 4!!!
+	local YQ_VER=$($YQ -V yq -V | sed -r 's/^([^.]+).*$/\1/; s/^[^0-9]*([0-9]+).*$/\1/')
+	#########################################################################
+	#########################################################################
+	#########################################################################
+	#########################################################################
+	
 	# Search for our network yaml file 1 level deep
 	LCONF_FILE="$(ubuntu_netplan_cfg_find)"
 

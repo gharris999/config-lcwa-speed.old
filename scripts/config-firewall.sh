@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SCRIPT_VERSION=20201207.153746
+SCRIPT_VERSION=20201220.100638
 
 # Bash script to configure firewall.
 
@@ -383,7 +383,7 @@ config_firewall_ports() {
 }
 
 
-config_firewall_iface_open_ports(){
+config_firewall_iface_ports_open(){
 	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
 	local LIFACE="$1"
 	local LPORT=
@@ -411,7 +411,7 @@ config_firewall_iface_open_ports(){
 	do
 		[ -z "$LPORT" ] && continue
 		[ $QUIET -lt 1 ] && error_echo "Opening ${LPORT}/${LPROT} on ${LIFACE}"
-		[ $TEST -lt 1 ] && iface_firewall_open_port "$LIFACE" "udp" "$LPORT"
+		[ $TEST -lt 1 ] && iface_firewall_port_open "$LIFACE" "udp" "$LPORT"
 	done
 
 	LPROT='tcp'
@@ -419,7 +419,7 @@ config_firewall_iface_open_ports(){
 	do
 		[ -z "$LPORT" ] && continue
 		[ $QUIET -lt 1 ] && error_echo "Opening ${LPORT}/${LPROT} on ${LIFACE}"
-		[ $TEST -lt 1 ] && iface_firewall_open_port "$LIFACE" "tcp" "$LPORT"
+		[ $TEST -lt 1 ] && iface_firewall_port_open "$LIFACE" "tcp" "$LPORT"
 	done
 
 	return 0
@@ -432,7 +432,7 @@ config_firewall_iface_open_ports(){
 #
 ########################################################################################
 
-config_firewall_ipaddr_open_ports(){
+config_firewall_ipaddr_ports_open(){
 	[ $DEBUG -gt 0 ] && error_echo "${FUNCNAME}( $@ )"
 	local LIPADDR="$1"
 	local LPORT=
@@ -453,7 +453,7 @@ config_firewall_ipaddr_open_ports(){
 	do
 		[ -z "$LPORT" ] && continue
 		[ $QUIET -lt 1 ] && error_echo "Opening ${LPORT}/${LPROT} on ${LIPADDR}"
-		[ $TEST -lt 1 ] && ipaddr_firewall_open_port "$LIPADDR" "udp" "$LPORT"
+		[ $TEST -lt 1 ] && ipaddr_firewall_port_open "$LIPADDR" "udp" "$LPORT"
 	done
 
 	#~ for PORT in ${!TCP_PORTS[*]};
@@ -462,7 +462,7 @@ config_firewall_ipaddr_open_ports(){
 	do
 		[ -z "$LPORT" ] && continue
 		[ $QUIET -lt 1 ] && error_echo "Opening ${LPORT}/${LPROT} on ${LIPADDR}"
-		[ $TEST -lt 1 ] && ipaddr_firewall_open_port "$LIPADDR" "tcp" "$LPORT"
+		[ $TEST -lt 1 ] && ipaddr_firewall_port_open "$LIPADDR" "tcp" "$LPORT"
 	done
 
 	return 0

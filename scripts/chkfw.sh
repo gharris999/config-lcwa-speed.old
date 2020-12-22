@@ -1,10 +1,10 @@
 #!/bin/bash
 
-SCRIPT_VERSION=20201207.141228
+SCRIPT_VERSION=20201221.223518
 
-# Script to check network status on boot.  Called from rc.local
-#
-#
+# Script to check ufw firewall status on boot.  Called from rc.local.
+#		If our current subnet does not match the subnet in the firewall, 
+#		then reconfigure the firewall...
 
 INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
 [ ! -f "$INCLUDE_FILE" ] && INCLUDE_FILE='/usr/local/sbin/instsrv_functions.sh'
@@ -54,15 +54,6 @@ get_links_wait(){
 	# Make 5 attempts to find a link..
 	for n in 1 2 3 4 5
 	do
-		# Find the 1st (sorted alpha) networking interface with a good link status..
-		#~ for LIFACE in $(ifaces_get)
-		#~ do
-			#~ #Check the link status..
-			#~ iface_has_link "$LIFACE"
-			#~ if [ $? -eq 0 ]; then
-				#~ LIFACES="${LIFACES} ${LIFACE}"
-			#~ fi
-		#~ done
 		LIFACES=$(ifaces_get_links)
 		if [ ! -z "$LIFACES" ]; then
 			break
