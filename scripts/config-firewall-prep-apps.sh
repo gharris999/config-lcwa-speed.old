@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SCRIPT_VERSION=20201221.124923
+SCRIPT_VERSION=20201221.134923
 
 # Bash script to create application / service.xml profiles for firewall
 # rules for our commonly added services.

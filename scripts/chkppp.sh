@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SCRIPT_VERSION=20201206.155240
+SCRIPT_VERSION=20201206.165240
 
 # Bash script to check to see if a pppoe connection is still up, and if not, re-establish it.
 

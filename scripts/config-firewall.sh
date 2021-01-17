@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SCRIPT_VERSION=20201220.100638
+SCRIPT_VERSION=20201220.110638
 
 # Bash script to configure firewall.
 

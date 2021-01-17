@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SCRIPT_VERSION=20201207.125215
+SCRIPT_VERSION=20201207.135215
 
 # Script to check network status on boot.  Called from rc.local
 # Version 20200430.01

@@ -2,7 +2,7 @@
 # lcwa-speed-update.sh -- script to update lcwa-speed git repo and restart service..
 # Version Control for this script
 
-SCRIPT_VERSION=20201222.131203
+SCRIPT_VERSION=20201222.141203
 
 INST_NAME='lcwa-speed'
 
@@ -384,7 +384,7 @@ utility_scripts_install(){
 service_update_check(){
 	local LLOCAL_REPO="$1"
 	local LINSTALL_XML="${LLOCAL_REPO}/install.xml"
-	local LREPO_VERSION=20201222.131203
+	local LREPO_VERSION=20201222.141203
 	local LREPO_EPOCH=
 	local LLCWA_EPOCH=
 	
@@ -396,7 +396,7 @@ service_update_check(){
 	log_msg "Checking ${LLOCAL_REPO}/install.xml to see if an update of the ${INST_NAME} service is required."
 	
 	#~ <version>20200511.232252</version>
-	LREPO_VERSION=20201222.131203
+	LREPO_VERSION=20201222.141203
 	
 	if [ $DEBUG -gt 0 ]; then
 		LREPO_EPOCH="$(echo "$LREPO_VERSION" | sed -e 's/\./ /g' | sed -e 's/\([0-9]\{8\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1 \2:\3:\4/')"

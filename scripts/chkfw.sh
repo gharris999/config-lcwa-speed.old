@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SCRIPT_VERSION=20201221.223518
+SCRIPT_VERSION=20201221.233518
 
 # Script to check ufw firewall status on boot.  Called from rc.local.
 #		If our current subnet does not match the subnet in the firewall, 

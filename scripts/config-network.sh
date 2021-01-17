@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SCRIPT_VERSION=20201221.115422
+SCRIPT_VERSION=20201221.125422
 
 # Bash script to configure default NIC to a static IP address..
 
@@ -496,8 +496,8 @@ yq_install(){
 	YQ="$(which yq)"
 	
 	if [ ! -z "$YQ" ]; then
-		YQ_REMOTE_VERSION=20201221.115422
-		YQ_LOCAL_VERSION=20201221.115422
+		YQ_REMOTE_VERSION=20201221.125422
+		YQ_LOCAL_VERSION=20201221.125422
 		
 		if [[ ! "$YQ_REMOTE_VERSION" < "$YQ_LOCAL_VERSION" ]]; then
 			error_echo "${YQ}, version ${YQ_LOCAL_VERSION} is up to date with remote version ${YQ_REMOTE_VERSION}."
