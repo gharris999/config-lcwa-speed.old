@@ -1,6 +1,6 @@
 #!/bin/bash
 
-SCRIPT_VERSION=20201221.125422
+SCRIPT_VERSION=20210117.145727
 
 # Bash script to configure default NIC to a static IP address..
 
@@ -463,7 +463,7 @@ yq_install(){
 		rm -f "${TMPDIR}/index.html"
 	fi
 
-	# YQ 4.x too broken to use thus far!!!
+	# Don't know how to use YQ 4.x syntax thus far, so don't use it!!!
 	#~ YQ_INDEX='https://github.com/mikefarah/yq/releases/latest/'
 	YQ_INDEX='https://github.com/mikefarah/yq/releases/tag/3.4.1/'
 	
@@ -496,11 +496,11 @@ yq_install(){
 	YQ="$(which yq)"
 	
 	if [ ! -z "$YQ" ]; then
-		YQ_REMOTE_VERSION=20201221.125422
-		YQ_LOCAL_VERSION=20201221.125422
+		YQ_REMOTE_VER="$(echo $YQ_BIN_URL | sed -n -e 's#^.*/\([0123456789\.]\+\)/.*$#\1#p')"
+		YQ_LOCAL_VER="$("$YQ" -V | sed -n -e 's/^.*version \(.*\)$/\1/p')"
 		
-		if [[ ! "$YQ_REMOTE_VERSION" < "$YQ_LOCAL_VERSION" ]]; then
-			error_echo "${YQ}, version ${YQ_LOCAL_VERSION} is up to date with remote version ${YQ_REMOTE_VERSION}."
+		if [[ ! "$YQ_REMOTE_VER" < "$YQ_LOCAL_VER" ]]; then
+			error_echo "${YQ}, version ${YQ_LOCAL_VER} is up to date with remote version ${YQ_REMOTE_VER}."
 			return 1
 		fi
 	fi
