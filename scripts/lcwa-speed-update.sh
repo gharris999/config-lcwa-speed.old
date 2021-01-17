@@ -2,7 +2,7 @@
 # lcwa-speed-update.sh -- script to update lcwa-speed git repo and restart service..
 # Version Control for this script
 
-SCRIPT_VERSION=20201222.141203
+SCRIPT_VERSION=20210117.152742
 
 INST_NAME='lcwa-speed'
 
@@ -384,7 +384,7 @@ utility_scripts_install(){
 service_update_check(){
 	local LLOCAL_REPO="$1"
 	local LINSTALL_XML="${LLOCAL_REPO}/install.xml"
-	local LREPO_VERSION=20201222.141203
+	local LREPO_VER=
 	local LREPO_EPOCH=
 	local LLCWA_EPOCH=
 	
@@ -396,10 +396,11 @@ service_update_check(){
 	log_msg "Checking ${LLOCAL_REPO}/install.xml to see if an update of the ${INST_NAME} service is required."
 	
 	#~ <version>20200511.232252</version>
-	LREPO_VERSION=20201222.141203
+	LREPO_VER="$(grep -E '<version>[0-9]{8}\.[0-9]{6}</version>' "$LINSTALL_XML" | sed -n -e 's/^.*\([0-9]\{8\}\.[0-9]\{6\}\).*$/\1/p')"
+
 	
 	if [ $DEBUG -gt 0 ]; then
-		LREPO_EPOCH="$(echo "$LREPO_VERSION" | sed -e 's/\./ /g' | sed -e 's/\([0-9]\{8\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1 \2:\3:\4/')"
+		LREPO_EPOCH="$(echo "$LREPO_VER" | sed -e 's/\./ /g' | sed -e 's/\([0-9]\{8\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1 \2:\3:\4/')"
 		LREPO_EPOCH="$(date "-d${LREPO_EPOCH}" +%s)"
 		LLCWA_EPOCH="$(echo "$LCWA_VERSION" | sed -e 's/\./ /g' | sed -e 's/\([0-9]\{8\}\) \([0-9]\{2\}\)\([0-9]\{2\}\)\([0-9]\{2\}\)/\1 \2:\3:\4/')"
 		LLCWA_EPOCH="$(date "-d${LLCWA_EPOCH}" +%s)"
@@ -416,12 +417,12 @@ service_update_check(){
 	fi
 	
 	# If the repo version is greater than our version..
-	if [[ "$LREPO_VERSION" > "$LCWA_VERSION" ]]; then
+	if [[ "$LREPO_VER" > "$LCWA_VERSION" ]]; then
 		# Install updated utility scripts..
 		# Redundant??
 		#~ utility_scripts_install "${LLOCAL_REPO}/scripts"
 		# Update the service
-		log_msg "Updating installed ${INST_NAME} service version ${LCWA_VERSION} to new version ${LREPO_VERSION} from ${LLOCAL_REPO}/config-${INST_NAME}.sh"
+		log_msg "Updating installed ${INST_NAME} service version ${LCWA_VERSION} to new version ${LREPO_VER} from ${LLOCAL_REPO}/config-${INST_NAME}.sh"
 		[ $TEST_ONLY -lt 1 ] && "${LLOCAL_REPO}/config-${INST_NAME}.sh" --update
 	fi
 	
