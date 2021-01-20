@@ -2,7 +2,7 @@
 # lcwa-speed-update.sh -- script to update lcwa-speed git repo and restart service..
 # Version Control for this script
 
-SCRIPT_VERSION=20210117.152742
+SCRIPT_VERSION=20210119.180400
 
 INST_NAME='lcwa-speed'
 
@@ -381,7 +381,40 @@ utility_scripts_install(){
 }
 
 
+script_version_get(){
+	local LSCRIPT="$1"
+	sed -n -e 's/^SCRIPT_VERSION=20210119.180400
+}
+
+
 service_update_check(){
+	local LLOCAL_REPO="$1"
+	local LBEFORE_VER="$2"
+	local LINSTALL_XML="${LLOCAL_REPO}/install.xml"
+	local LREPO_VER="$(grep -E '<version>[0-9]{8}\.[0-9]{6}</version>' "$LINSTALL_XML" | sed -n -e 's/^.*\([0-9]\{8\}\.[0-9]\{6\}\).*$/\1/p')"
+	local LCONFIG_SCRIPT="${LLOCAL_REPO}/config-${INST_NAME}.sh"
+	local LAFTER_VER=$(script_version_get "$LCONFIG_SCRIPT")
+	
+	if [ $DEBUG -gt 0 ]; then
+		log_msg "Comparing versions of ${LCONFIG_SCRIPT} to see if service reconfiguration needed.."
+		log_msg "  Before pull version: ${LBEFORE_VER}"
+		log_msg "   After pull version: ${LAFTER_VER}"
+	fi
+	
+	# If the repo version is greater than our version..
+	if [[ "$LAFTER_VER" > "$LBEFORE_VER" ]]; then
+		# Update the service
+		log_msg "Updating installed ${INST_NAME} service version ${LCWA_VERSION} to new version ${LREPO_VER} from ${LLOCAL_REPO}/config-${INST_NAME}.sh"
+		[ $TEST_ONLY -lt 1 ] && "$LCONFIG_SCRIPT" --update
+	else
+		log_msg "Service ${INST_NAME}, version ${LCWA_VERSION} is up to date.  ${LAFTER_VER} is not > ${LBEFORE_VER}."
+	fi
+
+
+}
+
+
+service_update_check_old(){
 	local LLOCAL_REPO="$1"
 	local LINSTALL_XML="${LLOCAL_REPO}/install.xml"
 	local LREPO_VER=
@@ -500,11 +533,12 @@ service_stop
 git_check_up_to_date "$LCWA_LOCALREPO"
 
 # Check & update the suplimental repo (contains this script)
+BEFORE_VER=$(script_version_get "${LCWA_LOCALSUPREPO}/config-${INST_NAME}.sh")
 git_check_up_to_date "$LCWA_LOCALSUPREPO"
 
 # Service version is: $LCWA_VERSION
 # See if we need to update the service installation
-service_update_check "$LCWA_LOCALSUPREPO"
+service_update_check "$LCWA_LOCALSUPREPO" "$BEFORE_VER"
 
 # See if we need to update this update script..
 if [ $SERVICES_UPDATE -gt 0 ]; then

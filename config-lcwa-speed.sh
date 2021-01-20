@@ -4,7 +4,7 @@
 # Bash script for installing Andi Klein's Python LCWA PPPoE Speedtest Logger 
 # as a service on systemd, upstart & sysv systems
 ######################################################################################################
-SCRIPT_VERSION=20210117.150333
+SCRIPT_VERSION=20210119.175021
 REQINCSCRIPTVER=20200422
 
 INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
@@ -13,7 +13,8 @@ INCLUDE_FILE="$(dirname $(readlink -f $0))/instsrv_functions.sh"
 . "$INCLUDE_FILE"
 
 if [[ -z "$INCSCRIPT_VERSION" ]] || [[ "$INCSCRIPT_VERSION" < "$REQINCSCRIPTVER" ]]; then
-	error_exit "Version ${REQINCSCRIPTVER} of ${INCLUDE_FILE} required.  Installed version is ${INCSCRIPT_VERSION}"
+	# Don't error_exit -- at least try to continue with the utility functions as installed..
+	error_echo "Version ${REQINCSCRIPTVER} of ${INCLUDE_FILE} required.  Installed version is ${INCSCRIPT_VERSION}"
 fi
 
 SCRIPT="$(readlink -f "$0")"
@@ -112,7 +113,7 @@ HOSTNAME=$(hostname | tr [a-z] [A-Z])
 #~ LCWA_PRODUCT="$INST_PROD"
 #~ LCWA_DESC="$INST_DESC"
 #~ LCWA_PRODUCTID="f1a4af09-977c-458a-b3f7-f530fb9029c1"				# Random GUID..
-#~ LCWA_VERSION=20210117.150333
+#~ LCWA_VERSION=20210119.175021
 
 # User account and group under which the service will run..
 #~ LCWA_USER="$INST_USER"
@@ -166,7 +167,7 @@ LCWA_SERVICE=
 LCWA_PRODUCT=
 LCWA_DESC=
 LCWA_PRODUCTID=
-LCWA_VERSION=20210117.150333
+LCWA_VERSION=20210119.175021
 
 LCWA_USER=
 LCWA_GROUP=
@@ -260,7 +261,7 @@ env_vars_defaults_get(){
 	[ -z "$LCWA_PRODUCT" ] 			&& LCWA_PRODUCT="$(echo "$INST_NAME" |  tr [a-z] [A-Z])"
 	[ -z "$LCWA_DESC" ] 			&& LCWA_DESC="${LCWA_PRODUCT}-TEST Logger"
 	[ -z "$LCWA_PRODUCTID" ] 		&& LCWA_PRODUCTID="f1a4af09-977c-458a-b3f7-f530fb9029c1"
-	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20210117.150333
+	[ -z "$LCWA_VERSION" ] 			&& LCWA_VERSION=20210119.175021
 	
 	[ -z "$LCWA_USER" ] 			&& LCWA_USER="$INST_USER"
 	[ -z "$LCWA_GROUP" ] 			&& LCWA_GROUP="$INST_GROUP"
